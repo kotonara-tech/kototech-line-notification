@@ -19,6 +19,11 @@ variable "spreadsheet_id" {
   type        = string
 }
 
+variable "line_channel_id" {
+  description = "この環境で使う LINE チャネルの ID(ステートレスなアクセストークンの発行に使う。秘匿情報ではない)"
+  type        = string
+}
+
 variable "scheduler_paused" {
   description = "初回デプロイ前はイメージが placeholder のため、Scheduler を一時停止しておく"
   type        = bool

@@ -33,7 +33,7 @@ module "secret_manager" {
   source = "../../modules/secret_manager"
 
   project_id = var.project_id
-  secret_ids = ["line-channel-access-token", "line-channel-secret"]
+  secret_ids = ["line-channel-secret"]
 
   depends_on = [module.apis]
 }
@@ -48,14 +48,16 @@ module "cloud_run_job_scan" {
 
   # 同一バイナリを環境変数で切り替える。ROLE がこのプロセスの役割を決める
   env_vars = {
-    APP_ENV        = local.env
-    ROLE           = "scan"
-    SPREADSHEET_ID = var.spreadsheet_id
+    APP_ENV         = local.env
+    ROLE            = "scan"
+    SPREADSHEET_ID  = var.spreadsheet_id
+    LINE_CHANNEL_ID = var.line_channel_id
   }
 
+  # アクセストークンは保管しない。アプリが LINE_CHANNEL_ID と LINE_CHANNEL_SECRET から、
+  # 実行のたびにステートレスなチャネルアクセストークンを発行する
   secret_env_vars = {
-    LINE_CHANNEL_ACCESS_TOKEN = module.secret_manager.secret_ids["line-channel-access-token"]
-    LINE_CHANNEL_SECRET       = module.secret_manager.secret_ids["line-channel-secret"]
+    LINE_CHANNEL_SECRET = module.secret_manager.secret_ids["line-channel-secret"]
   }
 
   depends_on = [module.apis]
