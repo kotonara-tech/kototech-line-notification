@@ -28,7 +28,8 @@ type Runner interface {
 	Run(ctx context.Context) error
 }
 
-// NewRunner は、ROLE に対応する Runner を作る。
+// NewRunner は、ROLE に対応する Runner を作る。環境変数 ROLE による役割の切り替えは、ここにある。
+// 役割を増やすときは、config.Role に値を足し、ここに case を足す(ビルドする Go バイナリは 1 つのまま)。
 func NewRunner(ctx context.Context, cfg config.Config, logger *slog.Logger) (Runner, error) {
 	switch cfg.Role {
 	case config.RoleScan:

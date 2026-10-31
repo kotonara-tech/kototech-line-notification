@@ -82,7 +82,10 @@ flowchart TD
 | `api` | HTTP サーバとして `PORT` で待ち受ける | Cloud Run Service(将来、Terraform にモジュールを追加) | 未実装。`ROLE=api` で起動した場合は「未実装」のエラーで終了コード 2 |
 
 - `ROLE` は**必須**。未設定でも既定値で動かさず、エラーにする(設定ミスで想定外の動作をすることを防ぐ)
-- 各 ROLE は、共通の `Runner`(`Run(ctx) error`)として登録し、`main` は `ROLE` に対応する Runner を呼ぶだけにする
+- 各 ROLE は、共通の `Runner`(`Run(ctx) error`)として実装し、`main` は `ROLE` に対応する Runner を呼ぶだけにする。切り替えの在りか:
+  - `internal/config/config.go`: `ROLE` を読み、`scan` / `api` 以外と未設定をエラー(終了コード 2)にする
+  - `internal/bootstrap/bootstrap.go` の `NewRunner`: `switch cfg.Role` で、ROLE に対応する Runner を選ぶ(`scan` のみ実装。`api` は「未実装」のエラー)
+  - `cmd/notifier/main.go`: 設定を読み、`NewRunner` の結果を実行して、終了コードにする(役割ごとの処理は持たない)
 - 役割を増やすときは、`ROLE` の値・Runner・(必要なら)ユースケースを追加する。Job なら同じイメージを使う Job を Terraform に足し、API なら Cloud Run Service のモジュールを足す
 - 必須の環境変数は `ROLE` ごとに検証する。足りなければ、起動時に**一括で**エラーを出して終了する
 - `ROLE=scan` ではポート待ち受け・ヘルスチェック・Webhook 受信は持たない
