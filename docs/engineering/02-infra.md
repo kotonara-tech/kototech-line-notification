@@ -154,6 +154,7 @@ infra/terraform/
 - **削除のガード**: `plan` の後、`apply` の前に、`terraform show -json` から、`delete` を含む変更(作り直しの `replace` を含む)の**リソースのアドレスとアクションだけ**を取り出す(`plan` の値は機密を含みうるため、出力しない)。1 件でもあり、入力 `allow_destroy`(既定 `false`)が `false` なら、`apply` を止めてジョブを失敗させ、一覧をステップサマリに出す。`apply: false`(plan のみ)のときは、失敗させず、警告として一覧を出す
 - `allow_destroy` は、`apply-to-dev` / `apply-to-prod` の手動実行の入力で、既定は `false`。`deploy-to-dev` / `deploy-to-prod` は渡さない(常に `false`)ため、削除を含む計画では、自動のデプロイがインフラの段階で止まる。意図した削除は、`apply` を false にして一覧を確かめてから、`apply-to-*` を `allow_destroy` を true にして実行する。削除や作り直しが起きたときの復旧は [../operations/02-recovery.md](../operations/02-recovery.md)
 - Terraform の変数(`project_id` など)は、tfvars をコミットしないため、Environment の variables を `TF_VAR_*` として渡す
+- 変数の形式は、`variables.tf` の `validation` で検査する(`project_id`・`region`・`spreadsheet_id`・`line_channel_id`・`github_repository`・`notify_lead_minutes`。`bootstrap` は `state_bucket_name`・`state_admins` も)。Environment の variables の前後に空白が入ると、`plan` がエラーで失敗し、`apply` まで進まない(`project_id`・`region` は provider の設定に使うため、リソースの計画より前に止まる)。エラーメッセージが、確認する GitHub 変数の名前を示す
 - `deploy-to-*` の順序は **QA → インフラ → アプリのデプロイ**。Cloud Run Job や Artifact Registry を Terraform が先に作ってから、イメージを更新する
 - Environment `prod` の承認は、ジョブごとに求められるため、prod では「インフラ」と「アプリのデプロイ」で 2 回承認する
 - **既知の制約**: Environment の承認は、ジョブの開始時に求められるため、`plan` を見る**前**になる(v1.0.0 では、承認の後に、削除を含む計画がそのまま適用された)。削除のガード(上記)が、この点を補う。承認の前に `plan` を確認する形にするには、承認を挟まない plan 専用の Environment を別に用意する必要がある。Environment の variables は Environment ごとなので、同じ値をもう 1 組持つことになる。今回は構成を変えていない(未実施)
