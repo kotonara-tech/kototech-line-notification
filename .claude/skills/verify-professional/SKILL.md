@@ -104,6 +104,7 @@ Actions はローカルで動かせない(`act` も、WIF・Environment・承認
 
 **E. 実行の安全性**
 - `plan` の結果を、**そのまま** `apply` するか(保存したプラン)。`destroy` / `replace` が含まれるときは、**何が消えるか**を読む
+- `apply` の前に、**削除のガード**があるか(`reusable-infra-deploy.yml`: `delete` / `replace` を含む計画を、`allow_destroy` が false なら止める)。Environment の承認は `plan` の前に求められ、承認では守れない。ガードを外していないか、`deploy-to-*` が `allow_destroy` を true で渡していないか。ガードの `jq` を変えたら、削除・replace・変更なし・`resource_changes` が無い計画の、サンプルの JSON で確かめる
 - `deletion_protection` が有効なリソースが `tainted` になると、作り直しで止まる。実体が健全なら `untaint`
 - 失敗して途中で止まったとき、**再実行しても安全か**(冪等か)。中途半端な状態から、続きを実行できるか
 - 同じ環境の `apply` が並列にならないか(`concurrency`)

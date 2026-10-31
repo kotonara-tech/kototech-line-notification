@@ -121,11 +121,11 @@ infra/terraform/
 | `ci.yml` | QA のみ(`make verify` と同じ範囲) | PR の作成・コミットの追加・開き直し(毎回)、手動 |
 | `reusable-qa.yml` | backend の `make test` / `make lint` / `make build`、Terraform の `fmt` / `validate`、ドキュメントと yml の検査(`scripts/verify.mjs`) | 他から呼び出し |
 | `reusable-integration-test.yml` | インテグレーションテスト(`make integration-test`)。**実行用サービスアカウントを借りて**、実際の工程表を読めることを確認する(読み取りのみ) | 他から呼び出し |
-| `reusable-infra-deploy.yml` | Terraform の `init` → `validate` → `plan` → `apply`(`apply: false` で plan のみ) | 他から呼び出し |
+| `reusable-infra-deploy.yml` | Terraform の `init` → `validate` → `plan` → **削除のガード** → `apply`(`apply: false` で plan のみ。`allow_destroy: true` で削除を許可) | 他から呼び出し |
 | `reusable-deploy-backend.yml` | イメージのビルド → Artifact Registry へ push → Cloud Run Job のイメージ更新 | 他から呼び出し |
 | `deploy-to-dev.yml` | QA → インフラ(Terraform)→ **インテグレーションテスト** → アプリのデプロイ | `develop` への push、手動(任意のブランチ) |
 | `deploy-to-prod.yml` | QA → インフラ(Terraform)→ アプリのデプロイ | `main` への push、手動。`main` 以外は拒否 |
-| `apply-to-dev.yml` | **インフラ(Terraform)だけ**を適用する。QA とアプリのデプロイはしない。`apply` を false にすると plan だけ | 手動のみ(任意のブランチ) |
+| `apply-to-dev.yml` | **インフラ(Terraform)だけ**を適用する。QA とアプリのデプロイはしない。`apply` を false にすると plan だけ。`allow_destroy` を true にすると、削除を含む計画も適用する | 手動のみ(任意のブランチ) |
 | `apply-to-prod.yml` | 同上(prod)。`main` 以外は拒否。Environment `prod` の承認あり | 手動のみ |
 
 - ブランチ運用は [../operations/01-operations.md](../operations/01-operations.md) を参照
@@ -151,9 +151,12 @@ infra/terraform/
 - Environment `prod` に Required reviewers を設定し、デプロイ前に承認を挟む
 - イメージは `<リポジトリ URL>/notifier:<コミット SHA>` でタグ付けする。Job の環境変数・Secret は Terraform の管理で、CD はイメージだけを更新する
 - Terraform は GitHub Actions から実行する(D22)。`reusable-infra-deploy.yml` が `plan` の結果を保存し、**そのプランをそのまま `apply`** する。`plan` の内容はジョブのサマリに出力される
+- **削除のガード**: `plan` の後、`apply` の前に、`terraform show -json` から、`delete` を含む変更(作り直しの `replace` を含む)の**リソースのアドレスとアクションだけ**を取り出す(`plan` の値は機密を含みうるため、出力しない)。1 件でもあり、入力 `allow_destroy`(既定 `false`)が `false` なら、`apply` を止めてジョブを失敗させ、一覧をステップサマリに出す。`apply: false`(plan のみ)のときは、失敗させず、警告として一覧を出す
+- `allow_destroy` は、`apply-to-dev` / `apply-to-prod` の手動実行の入力で、既定は `false`。`deploy-to-dev` / `deploy-to-prod` は渡さない(常に `false`)ため、削除を含む計画では、自動のデプロイがインフラの段階で止まる。意図した削除は、`apply` を false にして一覧を確かめてから、`apply-to-*` を `allow_destroy` を true にして実行する。削除や作り直しが起きたときの復旧は [../operations/02-recovery.md](../operations/02-recovery.md)
 - Terraform の変数(`project_id` など)は、tfvars をコミットしないため、Environment の variables を `TF_VAR_*` として渡す
 - `deploy-to-*` の順序は **QA → インフラ → アプリのデプロイ**。Cloud Run Job や Artifact Registry を Terraform が先に作ってから、イメージを更新する
-- Environment `prod` の承認は、ジョブごとに求められるため、prod では「インフラ」と「アプリのデプロイ」で 2 回承認する。承認前に `plan` を確認する形に分けたい場合は、承認を挟まない plan 専用の Environment を別に用意する方法がある(未実施)
+- Environment `prod` の承認は、ジョブごとに求められるため、prod では「インフラ」と「アプリのデプロイ」で 2 回承認する
+- **既知の制約**: Environment の承認は、ジョブの開始時に求められるため、`plan` を見る**前**になる(v1.0.0 では、承認の後に、削除を含む計画がそのまま適用された)。削除のガード(上記)が、この点を補う。承認の前に `plan` を確認する形にするには、承認を挟まない plan 専用の Environment を別に用意する必要がある。Environment の variables は Environment ごとなので、同じ値をもう 1 組持つことになる。今回は構成を変えていない(未実施)
 - PR 上での `plan` は未実装(`ci.yml` には含めていない)。`reusable-infra-deploy.yml` の `apply: false` で追加できる
 
 ## デプロイ用サービスアカウントの権限

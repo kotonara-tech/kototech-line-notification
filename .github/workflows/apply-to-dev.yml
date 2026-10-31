@@ -9,6 +9,10 @@ on:
         description: false にすると plan だけを実行する(apply しない)
         type: boolean
         default: true
+      allow_destroy:
+        description: true にすると、削除(作り直しを含む)がある計画でも apply する。false(既定)では、1 件でもあれば apply を止める
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,3 +26,4 @@ jobs:
     with:
       environment: dev
       apply: ${{ inputs.apply }}
+      allow_destroy: ${{ inputs.allow_destroy }}
