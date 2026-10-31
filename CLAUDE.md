@@ -12,7 +12,7 @@
 - `infra/terraform/` インフラ (`bootstrap` / `env/{dev,prod}` / `modules`)
 - `docs/infra/` インフラ構成図
 - `scripts/verify.mjs` ドキュメントと GitHub Actions(yml)の簡単な検査(`make verify` から呼ばれる)
-- `.claude/skills/` 開発用スキル: `go-professional`(backend の Go)、`infra-professional`(Terraform / GCP)、`docs-professional`(ドキュメント)、`verify-professional`(完了前の検証)。該当する作業の前に参照する
+- `.claude/skills/` 開発用スキル: `go-professional`(backend の Go)、`infra-professional`(Terraform / GCP)、`docs-professional`(ドキュメント)、`verify-professional`(完了前の検証)、`pr-professional`(PR の作成)。該当する作業の前に参照する
 
 ## 方針
 
@@ -25,4 +25,3 @@
 - 作業は Issue から始める。ブランチは `<種類>/<Issue番号>-<短い説明>`(例: `chore/2-title-prefix`)。Issue・PR のタイトルは `【INFRA】【BE】【DOCS】【CORE】` で始める。PR の先頭に `Closes #番号` を書いて、必ず Issue と関連付ける。**1 PR で閉じるのは 1 Issue まで**([docs/operations/01-operations.md](docs/operations/01-operations.md))
 - ブランチ運用: `develop` を起点に作業し、`main` は prod の写し。`develop` と `main` は Ruleset で保護済みで、**直 push はできない**(作業ブランチを切って PR を作る。`develop` 宛てはスカッシュ、`main` 宛て(リリース)はマージコミット)。他の人の Approve の必須化は、メンバーが揃ってから([docs/operations/01-operations.md](docs/operations/01-operations.md))
 - 返答・ドキュメントは日本語で書く
-- PR を作る・出すとき(タイトル・本文・宛先・Milestone・担当者・push・レビュワーに触れるとき)は、`pr-professional` の順番に従う。ルールの本体は [docs/operations/01-operations.md](docs/operations/01-operations.md) の「PR」
