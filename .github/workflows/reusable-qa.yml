@@ -14,7 +14,7 @@ env:
 
 jobs:
   backend:
-    name: backend (test / lint)
+    name: backend (test / lint / build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,6 +32,7 @@ jobs:
 
       - run: make test
       - run: make lint
+      - run: make build
 
   terraform:
     name: terraform (fmt / validate)
@@ -54,3 +55,16 @@ jobs:
             terraform -chdir="$dir" validate
           done
         working-directory: infra/terraform
+
+  # ドキュメントと yml の簡単な検査(ローカルの make verify と同じもの)
+  docs:
+    name: docs / yml (verify.mjs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: node scripts/verify.mjs

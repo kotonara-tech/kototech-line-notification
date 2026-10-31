@@ -1,7 +1,11 @@
 name: ci
 
+# PR を作ったとき、PR にコミットを push したとき、PR を開き直したときに、毎回実行する
+# (対象のブランチは絞らない。develop 宛ても main 宛ても実行される)。
+# 内容は、ローカルの make verify と同じ範囲(backend の test / lint / build、Terraform の fmt / validate、ドキュメントと yml の検査)
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
