@@ -1,0 +1,34 @@
+version: "2"
+
+linters:
+  # 既定(errcheck / govet / ineffassign / staticcheck / unused)に追加する
+  enable:
+    - errorlint
+    - depguard
+    - gocritic
+  settings:
+    depguard:
+      rules:
+        # domain は、標準ライブラリと、自分自身のパッケージだけを import できる(許可リスト)。
+        # 外側の層や外部ライブラリは、列挙しなくても、すべて拒否される
+        domain:
+          files:
+            - "**/internal/domain/**"
+          list-mode: strict
+          allow:
+            - $gostd
+            - github.com/kotonara-tech/kototech-line-notification/backend/internal/domain
+        # application は、標準ライブラリ・domain・自分自身だけを import できる。
+        # infrastructure や interfaces は、port のインターフェースを介してのみ使う
+        application:
+          files:
+            - "**/internal/application/**"
+          list-mode: strict
+          allow:
+            - $gostd
+            - github.com/kotonara-tech/kototech-line-notification/backend/internal/domain
+            - github.com/kotonara-tech/kototech-line-notification/backend/internal/application
+
+formatters:
+  enable:
+    - gofmt

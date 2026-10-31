@@ -1,0 +1,24 @@
+name: apply-to-dev
+
+# dev のインフラ(Terraform)だけを、手動で適用する。アプリのデプロイや QA は行わない。
+# 任意のブランチから実行できる(Workload Identity の条件は、dev ではブランチを制限しない)。
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: false にすると plan だけを実行する(apply しない)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  infra:
+    uses: ./.github/workflows/reusable-infra-deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: dev
+      apply: ${{ inputs.apply }}

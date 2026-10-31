@@ -1,0 +1,44 @@
+name: deploy-to-dev
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch: # 任意のブランチから dev へ手動デプロイできる
+
+permissions:
+  contents: read
+
+# 順序: QA → インフラ(Terraform)→ インテグレーションテスト → アプリのデプロイ
+# - Job 本体(Terraform 管理)が存在する状態でイメージを更新するため、インフラを先に適用する
+# - インテグレーションテストが使う権限(実行用サービスアカウントを借りる権限)は、インフラが作るため、
+#   インフラの適用のあとに実行する
+jobs:
+  qa:
+    uses: ./.github/workflows/reusable-qa.yml
+
+  infra:
+    needs: qa
+    uses: ./.github/workflows/reusable-infra-deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: dev
+
+  integration:
+    needs: infra
+    uses: ./.github/workflows/reusable-integration-test.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: dev
+
+  deploy:
+    needs: integration
+    uses: ./.github/workflows/reusable-deploy-backend.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: dev

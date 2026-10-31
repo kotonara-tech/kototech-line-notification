@@ -1,0 +1,78 @@
+name: reusable-infra-deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 対象の GitHub Environment 兼 Terraform の環境ディレクトリ名(dev / prod)
+        type: string
+        required: true
+      apply:
+        description: false なら plan のみ実行する
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.15.7
+
+jobs:
+  terraform:
+    name: terraform (plan${{ inputs.apply && ' / apply' || '' }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    # state のロックがあるが、apply は途中で中断させない
+    concurrency:
+      group: infra-deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform/env/${{ inputs.environment }}
+    env:
+      # env/*/variables.tf の変数。tfvars はコミットしないため、Environment の variables から渡す
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ vars.REGION || 'asia-northeast1' }}
+      TF_VAR_spreadsheet_id: ${{ vars.SPREADSHEET_ID }}
+      TF_VAR_line_channel_id: ${{ vars.LINE_CHANNEL_ID }}
+      TF_VAR_notify_lead_minutes: ${{ vars.NOTIFY_LEAD_MINUTES || '10' }}
+      # 初回デプロイ前は Job のイメージが placeholder のため、Scheduler を止めておく(既定)
+      TF_VAR_scheduler_paused: ${{ vars.SCHEDULER_PAUSED || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # 認証情報は ADC として扱われる(GOOGLE_APPLICATION_CREDENTIALS)。
+      # Terraform の google provider と GCS backend の両方がこれを使う
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - run: terraform init -input=false
+
+      - run: terraform validate
+
+      - name: plan
+        run: terraform plan -input=false -lock-timeout=5m -out=tfplan
+
+      - name: plan summary
+        run: |
+          {
+            echo '### terraform plan (${{ inputs.environment }})'
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # plan で確認した内容をそのまま適用する
+      - name: apply
+        if: inputs.apply
+        run: terraform apply -input=false -lock-timeout=5m tfplan

@@ -7,6 +7,8 @@
 | パス | 内容 |
 | --- | --- |
 | `engineering/` | 開発に必要な設計(アーキテクチャ、データ設計、API、運用など)をまとめる |
+| `operations/` | 運用ルール(GitHub の利用フローなど) |
+| `infra/` | インフラ構成図(`architecture.png`)と、その生成スクリプト(`generate_architecture.py`)・アイコン |
 | `mocks/` | Flex Message の見た目や、実際に届く表示イメージを全シナリオ分まとめた HTML モック |
 
 ## ルール

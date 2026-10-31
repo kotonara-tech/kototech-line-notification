@@ -1,0 +1,38 @@
+name: deploy-to-prod
+
+# main は prod の写し。main への push で起動する。
+# Workload Identity の条件で refs/heads/main 以外は認証が拒否される。
+# GitHub の Environment `prod` に Required reviewers を設定して承認を挟む。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/reusable-qa.yml
+
+  # Job 本体(Terraform 管理)が存在する状態でイメージを更新するため、インフラを先に適用する
+  infra:
+    needs: qa
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/reusable-infra-deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: prod
+
+  deploy:
+    needs: infra
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/reusable-deploy-backend.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: prod

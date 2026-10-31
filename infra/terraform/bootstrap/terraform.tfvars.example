@@ -1,0 +1,10 @@
+project_id = "your-ops-project-id"
+
+state_admins = [
+  # 手元で Terraform を実行する人
+  "user:you@example.com",
+  # GitHub Actions から Terraform を実行するための、dev / prod のデプロイ用サービスアカウント。
+  # env/dev, env/prod を最初に apply してサービスアカウントを作った後に追加して再適用する
+  "serviceAccount:github-deployer@your-dev-project-id.iam.gserviceaccount.com",
+  "serviceAccount:github-deployer@your-prod-project-id.iam.gserviceaccount.com",
+]
