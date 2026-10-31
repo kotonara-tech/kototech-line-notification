@@ -112,8 +112,8 @@ infra/terraform/
 
 | ファイル | 役割 | トリガー |
 | --- | --- | --- |
-| `ci.yml` | QA のみ | PR、手動 |
-| `reusable-qa.yml` | backend の `make test` / `make lint`、Terraform の `fmt` / `validate` | 他から呼び出し |
+| `ci.yml` | QA のみ(`make verify` と同じ範囲) | PR の作成・コミットの追加・開き直し(毎回)、手動 |
+| `reusable-qa.yml` | backend の `make test` / `make lint` / `make build`、Terraform の `fmt` / `validate`、ドキュメントと yml の検査(`scripts/verify.mjs`) | 他から呼び出し |
 | `reusable-integration-test.yml` | インテグレーションテスト(`make integration-test`)。**実行用サービスアカウントを借りて**、実際の工程表を読めることを確認する(読み取りのみ) | 他から呼び出し |
 | `reusable-infra-deploy.yml` | Terraform の `init` → `validate` → `plan` → `apply`(`apply: false` で plan のみ) | 他から呼び出し |
 | `reusable-deploy-backend.yml` | イメージのビルド → Artifact Registry へ push → Cloud Run Job のイメージ更新 | 他から呼び出し |

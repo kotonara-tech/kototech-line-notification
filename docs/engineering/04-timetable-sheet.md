@@ -84,7 +84,7 @@
 開始時刻: 10:15
 ```
 
-- 文面は固定(MVP)。見た目の改善(Flex Message 化)は、`docs/mocks/` で設計してから行う(D28)
+- 文面は、`backend/internal/infrastructure/line/template/starting_soon.go` のテンプレートで作る(MVP はテキスト)。見た目の改善(Flex Message 化)は、`docs/mocks/` で設計してから、テンプレートを足す(D28、D32)
 
 ## 読めない行の扱い
 

@@ -18,6 +18,7 @@ description: Go 言語のベストプラクティスと、このプロジェク�
 - 秘匿情報(LINE のチャネルシークレット)は Secret Manager から**環境変数として注入**される。アプリは Secret Manager の API を呼ばない
 - LINE のアクセストークンは**保管せず**、`infrastructure/line` の認証トランスポート(`http.RoundTripper`)が、ステートレスなトークンを自動で発行・再発行して `Authorization` に付ける。ユースケースやドメインはトークンを意識しない
 - LINE への送信は **broadcast**(全友だち)。送信先の概念をドメインに持たない
+- 通知の**文面は、ドメインに置かない**(D32。通常と違う判断)。ドメインの `notice` は、種類・元のプログラム・キーだけを持ち、文面は `infrastructure/line/template` の `text/template`(Go のファイルに直接)で作る。通知の種類を足すときは、`Kind` の文字列(キーの一部)を変えない
 
 ## 構成と依存の向き
 
@@ -27,9 +28,9 @@ backend/
 └── internal/
     ├── config/                 # 環境変数の読込・検証
     ├── bootstrap/              # 依存の組み立て(Composition Root)
-    ├── domain/{program,notice} # ビジネスルール。外部に依存しない
+    ├── domain/{program,notice} # ビジネスルール。外部に依存しない(notice は文面を持たない)
     ├── application/{port,scan} # ユースケースとポート(インターフェース)
-    ├── infrastructure/{sheets,line,clock}
+    ├── infrastructure/{sheets,line,clock}   # line/template に、通知の文面のテンプレート(D32)
     └── interfaces/{job,api}    # 入口のアダプタ
 ```
 

@@ -37,7 +37,7 @@ MVP は「起動して処理し、終了する」Cloud Run Job として動か�
 | `LINE_CHANNEL_SECRET` | LINE チャネルシークレット(アクセストークンの発行と、Webhook の署名検証に使う) | LINE へ送信する ROLE で必須 | Secret Manager |
 | `PORT` | 待ち受けポート | `ROLE=api` のとき | Cloud Run が設定 |
 
-- 切り替えの環境変数は **`ROLE` に一本化**する。Job でも `ROLE` を使い、`TASK` のような別の切り替え変数は持たない
+- 切り替えの環境変数は **`ROLE` に一本化**する。Job でも `ROLE` を使い、処理ごとに別の切り替え用の環境変数は持たない
 
 ### 秘匿情報の扱い
 
@@ -135,7 +135,8 @@ flowchart BT
 | 開始時刻 | `StartAt` | プログラムの開始日時(`time.Time`、JST で解釈) |
 | 通知済み | `NotifiedAt` | 通知した日時。空なら未通知 |
 | リードタイム(n 分) | `LeadTime` | 開始の何分前から通知するか |
-| 開始間近通知 | `notice.StartingSoon` | 「まもなく開始します」を伝える通知(MVP は固定文) |
+| 通知の種類 | `notice.Kind`(例: `KindStartingSoon`) | 何を通知するか。文面は持たない |
+| 開始間近通知 | `notice.NewStartingSoon` | 「まもなく開始します」を伝える通知。文面は `infrastructure/line/template/starting_soon.go` のテンプレートで作る |
 
 ### ドメイン層
 
@@ -168,7 +169,7 @@ type Repository interface {
 ```
 
 - 「開始まで n 分以内かつ未通知」「開始済みは対象外」(D6)は `IsDueForNotice` に置く。**時刻は引数で受け取り、`time.Now()` を直接呼ばない**
-- `domain/notice` は、プログラムから通知内容を作る値オブジェクト(MVP は固定文。Flex Message 化は `docs/mocks/` で設計してから拡張)
+- `domain/notice` は、「何を通知するか」(種類 `Kind`、元になるプログラム、重複判定のキー)だけを持つ値オブジェクト。**文面は持たない**(下記「通知の文面(テンプレート)」)
 - フィールドは、工程表の列([04-timetable-sheet.md](04-timetable-sheet.md))に対応する: イベント名・プログラム名・場所・開始日時・通知するか・通知済みの日時
 
 ### アプリケーション層
@@ -232,6 +233,29 @@ flowchart TD
 - 時刻は JST(`Asia/Tokyo`)で解釈する。コンテナにタイムゾーンデータがなくても動くよう、`time/tzdata` を import して埋め込む
 - ローカル開発では、`gcloud auth application-default login` またはサービスアカウントの偽装を使う(鍵ファイルは作らない)
 
+### 通知の文面(テンプレート)
+
+文面(LINE に送るメッセージ)は、**種類ごとのテンプレート**で作る。テンプレートは、Go のファイルの中に直接書く(`text/template`)。
+
+```
+domain/notice            通知の種類(Kind)・元のプログラム・キー。文面を持たない
+        ↑ 依存
+infrastructure/line/template   種類ごとのテンプレートと、値の当てはめ(starting_soon.go など)
+        ↑ 呼ぶ
+infrastructure/line      Notifier が、通知を受け取り、template.Render で LINE のメッセージにして送る
+```
+
+- **設計上の判断(通常と違う点)**: 通常は、文面をドメインに置く。ここでは意図的に、**LINE に送る側(infrastructure/line)に置く**。このソフトは、複数のテンプレートメッセージ(text、将来は Flex など、送る形式が違うもの)を使う。文面と LINE の形式は、セットで変わるため、ドメインに置くと、形式の事情がドメインに入り込む。依存の向きは、`infrastructure → domain` のまま(ドメインは、テンプレートを知らない)
+- `template.Render(notice)` が、通知の種類に対応するテンプレートで、LINE のメッセージ(`template.Message`)を返す。`Message` は、`text`(本文)と `flex`(代替テキストと contents)の両方を表せる
+- テンプレートに当てはめる値は、種類ごとの**表示用の構造体**(例: `startingSoonData`)に、ドメインの値を詰めて渡す。時刻の書式(`15:04`)などは、ここで決める
+- 書き方の誤り(未定義の値の参照など)は、`missingkey=error` で、黙って空にせず、エラーにする
+- Flex Message のテンプレートでは、関数 `json` で、値を JSON の文字列として差し込む(引用符や改行があっても、JSON が壊れない)
+- 通知の種類を足す手順:
+  1. `domain/notice` に、`Kind` と `NewXxx` を足し、`AllKinds` にも足す(キーは `<Kind>:<プログラム ID>` から作る。**既存の `Kind` の文字列は変えない**。変えると、同じ通知が別のキーになり、再送で二重に配信される)
+  2. `infrastructure/line/template` に、テンプレートのファイルを足す(`starting_soon.go` が見本)
+  3. `renderers` に登録する(登録漏れは、`TestEveryKindHasATemplate` が見つける)
+  4. 文面のテストを足す(出力する文字列を、そのまま比較する)
+
 ### インターフェース層
 
 | パッケージ | 内容 | 状態 |
@@ -253,13 +277,14 @@ backend/
 │   ├── bootstrap/              # 依存の組み立て(Composition Root)
 │   ├── domain/
 │   │   ├── program/            # Program 集約、LeadTime、Repository インターフェース
-│   │   └── notice/             # 通知内容の値オブジェクト
+│   │   └── notice/             # 通知の種類・元のプログラム・キー(文面は持たない)
 │   ├── application/
 │   │   ├── port/               # Notifier、Clock などのポート
 │   │   └── scan/               # scan ユースケース
 │   ├── infrastructure/
 │   │   ├── sheets/             # Program リポジトリの実装
-│   │   ├── line/               # Notifier の実装
+│   │   ├── line/               # Notifier の実装(LINE への送信、トークンの自動発行)
+│   │   │   └── template/       # 通知の文面のテンプレート(Go のファイルに直接書く。種類ごとに 1 ファイル)
 │   │   └── clock/              # Clock の実装
 │   └── interfaces/
 │       ├── job/                # ROLE=scan の Runner
@@ -293,6 +318,7 @@ backend/
 | `make lint` | `go vet` + `golangci-lint` |
 | `make integration-test` | `-tags=integration` のテスト。dev 環境の実 API を使う(ADC と環境変数が必要。prod に対しては実行しない)。環境変数 `IMPERSONATE_SERVICE_ACCOUNT` に実行用サービスアカウントを指定すると、それを借りて読む(CI はこの形) |
 | `make build` | `bin/notifier` を 1 つビルド(`CGO_ENABLED=0`、`GOOS` / `GOARCH` で上書き可) |
+| `make verify`(ルート) | 作業の完了前の検証。`test`・`lint`・`build`、Terraform の `fmt` / `validate`、ドキュメントと yml の検査(`scripts/verify.mjs`)を、続けて実行する |
 
 - ローカル実行は `ROLE=scan APP_ENV=dev SPREADSHEET_ID=... LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... go run ./cmd/notifier` のように環境変数で切り替える
 
@@ -304,4 +330,4 @@ backend/
 
 ## 未決
 
-[00-openquestion.md](00-openquestion.md) の Q6〜Q9、Q11、Q14、Q17、Q19 に依存する。
+[00-openquestion.md](00-openquestion.md) の Q6〜Q9、Q11、Q14、Q17 に依存する。

@@ -95,7 +95,7 @@ flowchart LR
 | 設定 | 値 |
 | --- | --- |
 | PR 必須(直 push 禁止) | 有効 |
-| 必須ステータスチェック | `ci` の QA(`backend`、`terraform`) |
+| 必須ステータスチェック | `ci` の QA(`backend (test / lint / build)`、`terraform (fmt / validate)`、`docs / yml (verify.mjs)`) |
 | ブランチを最新にしてからマージ | 有効 |
 | 必要な承認数 | 1(**PR の作成者以外**の Approve) |
 | 新しいコミットが push されたら承認を取り消す | 有効 |
@@ -131,5 +131,6 @@ flowchart LR
 ## コミット・PR
 
 - コミットメッセージは `type(scope): 内容` の形式(既存の履歴に合わせる)。日本語で書く
-- PR には、変更の目的、確認方法、関連する設計ドキュメント・Open Question の ID を書く
+- Issue は、テンプレート(`.github/ISSUE_TEMPLATE/task.md`)の「背景」と「具体的にやること」を埋める。1 つの Issue は 1 つの目的に絞り、PR の「関連する Issue」から参照する(`Closes #番号`)
+- PR は、テンプレート(`.github/pull_request_template.md`)の項目を埋める: 何を変えたか(100 文字)/ 変更の中身 / レビュアーに見てもらいたい点 / 検証 / 影響と後始末。関連する設計ドキュメント・Open Question の ID(`Q` / `D`)は、「影響と後始末」に書く
 - 1 つの PR は 1 つの目的に絞る
