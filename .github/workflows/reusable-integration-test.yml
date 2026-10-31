@@ -26,6 +26,9 @@ jobs:
       run:
         working-directory: backend
     steps:
+      - uses: actions/checkout@v4
+
+      # リポジトリを取得したあとで確認する(ジョブ全体の working-directory が backend のため、取得前は存在しない)
       - name: 必須の変数を確認する
         env:
           RUNTIME_SERVICE_ACCOUNT: ${{ vars.RUNTIME_SERVICE_ACCOUNT }}
@@ -39,8 +42,6 @@ jobs:
             fi
           done
           exit "$missing"
-
-      - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
