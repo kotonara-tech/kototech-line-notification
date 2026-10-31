@@ -195,6 +195,10 @@ Issue と PR のタイトルは、**領域のプレフィックス**で始める
 - ほかの Issue に関わる(閉じない)ときは、`Ref #番号` に書く
 - タイトルは、プレフィックスで始める。ブランチ名は、`<種類>/<Issue番号>-<短い説明>`
 - 1 つの PR は、1 つの目的に絞る
+- **Milestone を付ける**。この PR で閉じる(`Closes`)Issue と同じ Milestone にする
+- **担当者(Assignee)は、PR の作成者自身**にする
+- **レビュワーは、自動では Assign しない**。Assign すると、相手に通知が飛ぶため。レビュワーは、人が必要なときに指定する(AI やスクリプトが PR を作るときも、`gh pr create` に `--reviewer` を付けない)
+- PR を作るときの順番は、スキル `pr-professional`(`.claude/skills/pr-professional/SKILL.md`)にまとめている
 
 ### コミット
 
