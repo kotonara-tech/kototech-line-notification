@@ -31,18 +31,35 @@ MVP は「起動して処理し、終了する」Cloud Run Job として動か�
 | `ROLE` | **このプロセスの役割**。`scan`(MVP)/ `api`(将来) | 常に必須 | Terraform(平文) |
 | `APP_ENV` | `dev` / `prod` | 常に必須 | Terraform(平文) |
 | `SPREADSHEET_ID` | 工程表のスプレッドシート ID | `ROLE=scan` のとき必須 | Terraform(平文) |
-| `LINE_CHANNEL_ACCESS_TOKEN` | LINE チャネルアクセストークン | 送信する ROLE で必須 | Secret Manager |
-| `LINE_CHANNEL_SECRET` | LINE チャネルシークレット(Webhook の署名検証用) | `ROLE=scan` では任意(未使用)。`ROLE=api` で Webhook を受けるとき必須 | Secret Manager |
+| `LINE_CHANNEL_ID` | LINE チャネル ID(ステートレスなアクセストークンの発行に使う。秘匿情報ではない) | LINE へ送信する ROLE で必須 | Terraform(平文) |
+| `LINE_CHANNEL_SECRET` | LINE チャネルシークレット(アクセストークンの発行と、Webhook の署名検証に使う) | LINE へ送信する ROLE で必須 | Secret Manager |
 | `PORT` | 待ち受けポート | `ROLE=api` のとき | Cloud Run が設定 |
 
 - 切り替えの環境変数は **`ROLE` に一本化**する。Job でも `ROLE` を使い、`TASK` のような別の切り替え変数は持たない
 
 ### 秘匿情報の扱い
 
-- `LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET` などの秘匿情報は **Secret Manager に保管し、Cloud Run が環境変数として注入**する(Terraform の `secret_env_vars`)
+- `LINE_CHANNEL_SECRET` などの秘匿情報は **Secret Manager に保管し、Cloud Run が環境変数として注入**する(Terraform の `secret_env_vars`)
 - アプリは Secret Manager の API を呼ばない。環境変数を読むだけにする(SDK 依存と権限が増えない)
-- 原則は、その Job / サービスが実際に使う Secret だけを注入する(最小権限)。`ROLE=scan` の Job には `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_CHANNEL_SECRET` の両方を注入している(チャネルシークレットは、将来の Webhook 署名検証に備えて先に注入済み)。`scan` はチャネルシークレットを使わないため、config では**任意**として扱い、未設定でもエラーにしない
+- 注入するのは、その Job / サービスが実際に使う Secret だけにする(最小権限)
+- **チャネルアクセストークンは保管しない**。アプリが実行のたびに発行する(次節)
 - 秘匿情報はログに出さない。config では専用の型(`String()` / JSON 出力をマスクする)で保持する
+- 必須の環境変数が欠けていれば、起動時に終了コード 2 で止める(トークンの発行を試みない)
+
+### LINE の認証(アクセストークンの自動発行)
+
+LINE のアクセストークンは、**ステートレスなチャネルアクセストークン**(有効期間 約 15 分)を使う。人が発行・更新・ローテーションするトークンを持たない(手作業のミスを避ける)。
+
+- 発行: `POST https://api.line.me/oauth2/v3/token`(`grant_type=client_credentials`、`client_id` = チャネル ID、`client_secret` = チャネルシークレット)。レスポンスの `access_token` と `expires_in` を使う(仕様は公式で確認する)
+- **ミドルウェアとして実装する**: `infrastructure/line` の中で、`http.RoundTripper` を包む認証用トランスポートが、リクエストのたびに有効なトークンを `Authorization: Bearer` に付ける。呼び出し側(`Notifier`、ユースケース、ドメイン)は、トークンの存在を意識しない
+  - トークンはプロセスのメモリにだけ保持する。有効期限の少し前(余裕を持たせる)になったら、自動で再発行する
+  - 並行して呼ばれても、発行は 1 回にまとめる(排他する)
+  - `401` が返ったら、トークンを破棄して **1 回だけ**再発行して再試行する(それでも失敗すれば、エラーとして返す)
+- Job は短時間で終了するので、通常は実行ごとに 1 回の発行で済む
+- 発行に失敗した場合は、送信せずに終了コード 1 で終わる(次の分の実行で再試行される)
+- 発行したトークンは、ログに出さない
+
+**自動化できないもの**: チャネルシークレット(長期の認証情報)は、LINE 側に再発行の API がなく、コンソールでの手作業になる。漏洩時などに限られ、頻度は低い。手順は `02-infra.md` に残し、再発行したらすぐに Secret Manager に新しい version を追加する(`latest` を読むため、アプリの再デプロイは不要)。
 
 ### ROLE による切り替え
 
@@ -199,7 +216,7 @@ flowchart TD
 | パッケージ | 実装するもの | 使うもの | 認証 |
 | --- | --- | --- | --- |
 | `infrastructure/sheets` | `program.Repository` | `google.golang.org/api/sheets/v4` | Application Default Credentials(実行用サービスアカウント) |
-| `infrastructure/line` | `port.Notifier`(LINE の **broadcast** で全友だちへ送る) | `github.com/line/line-bot-sdk-go` または標準 `net/http`(`POST /v2/bot/message/broadcast`) | `LINE_CHANNEL_ACCESS_TOKEN` |
+| `infrastructure/line` | `port.Notifier`(LINE の **broadcast** で全友だちへ送る)と、トークン自動発行の認証トランスポート | 標準 `net/http`(`POST /v2/bot/message/broadcast`、`POST /oauth2/v3/token`)。公式 SDK は、トークンの扱いを差し込めるか確認して決める(Q12) | `LINE_CHANNEL_ID` + `LINE_CHANNEL_SECRET`(ステートレスなトークンを発行) |
 | `infrastructure/clock` | `port.Clock` | 標準ライブラリ | - |
 
 - **送信は broadcast のみ**。送信先(ユーザー ID・グループ ID)をドメインに持たない。`Notifier` は「通知内容」だけを受け取る
@@ -270,7 +287,7 @@ backend/
 | `make integration-test` | `-tags=integration` のテスト。dev 環境の実 API を使う(ADC と環境変数が必要。prod に対しては実行しない) |
 | `make build` | `bin/notifier` を 1 つビルド(`CGO_ENABLED=0`、`GOOS` / `GOARCH` で上書き可) |
 
-- ローカル実行は `ROLE=scan APP_ENV=dev SPREADSHEET_ID=... LINE_CHANNEL_ACCESS_TOKEN=... go run ./cmd/notifier` のように環境変数で切り替える
+- ローカル実行は `ROLE=scan APP_ENV=dev SPREADSHEET_ID=... LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... go run ./cmd/notifier` のように環境変数で切り替える
 
 ## ログ・エラー
 

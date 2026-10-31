@@ -16,8 +16,8 @@
 | Q9 | Webhook の要否。必要な場合、HTTP サービスを別に追加するか | broadcast なら友だちのユーザー ID の収集は不要。返信などの双方向機能を持たせる場合のみ。受ける場合は署名検証が必要で、未認証公開になる |
 | Q10 | タイムゾーン・日付またぎの扱い | Asia/Tokyo 想定 |
 | Q11 | Job の実行が重なった場合の排他 | 前回の実行が長引くと次の分の実行と重なる。冪等性で防ぐか、排他を入れるか |
-| Q12 | LINE の送信に公式 SDK(line-bot-sdk-go)を使うか、標準 `net/http` か | 03-backend.md |
-| Q14 | dev / prod 用のテストスプレッドシート・LINE チャネルの用意 | 環境は分ける(D8) |
+| Q12 | LINE の送信に公式 SDK(line-bot-sdk-go)を使うか、標準 `net/http` か | ステートレスなトークンの自動発行(認証トランスポート)を差し込めるかで判断する。03-backend.md |
+| Q14 | dev / prod 用のテストスプレッドシート・LINE チャネル(チャネル ID・チャネルシークレット)の用意 | 環境は分ける(D8) |
 | Q17 | 失敗時のアラート(Cloud Monitoring)の要否と通知先 | Q7 と関連 |
 | Q19 | インテグレーションテストの認証 | CI では dev のデプロイ用サービスアカウントで ADC になる。dev 用スプレッドシートをこのアカウントにも共有するか、実行用サービスアカウントを偽装するか。LINE トークンの扱いも含む |
 
@@ -45,7 +45,8 @@
 | D18 | `main` の保護は開発が安定した最後に掛ける。それまで(フェーズ 1)は `develop` への直 push 可。保護後は PR 必須で、**他の人の Approve が 1 件必須**(自己承認・バイパスなし) | 初期の開発速度を優先し、安定後に品質を担保する |
 | D19 | 全環境(ops / dev / prod)の課金アカウントは共通にする | 管理の簡素化 |
 | D20 | バックエンドは DDD の構成(domain / application / infrastructure / interfaces / bootstrap)とし、依存は内側(domain)へ向かう一方向とする | ビジネスルールを外部サービスの事情から分離する |
-| D21 | LINE のチャネルアクセストークン・チャネルシークレットなどの秘匿情報は Secret Manager に保管し、Cloud Run が環境変数として注入する。アプリは Secret Manager API を呼ばない。原則は使う Secret のみを注入する(`scan` の Job には、将来の Webhook に備えて `line-channel-secret` も注入済み) | 最小権限・SDK 依存の削減 |
+| D21 | LINE のチャネルシークレットなどの秘匿情報は Secret Manager に保管し、Cloud Run が環境変数として注入する。アプリは Secret Manager API を呼ばない。使う Secret のみを注入する | 最小権限・SDK 依存の削減 |
 | D22 | Terraform は GitHub Actions から実行する。デプロイ用サービスアカウントに Terraform 実行用のロールを付与し、state バケットへの権限は `bootstrap/` の `state_admins` で付与する | 手動の apply をなくす。実質管理者権限のため、prod は main 限定 + 承認で守る |
 | D23 | 通知は Cloud Run(Job)から LINE Messaging API の **broadcast**(全友だちへ一斉配信)で送る。送信先の管理(ユーザー ID・グループ ID)は持たない | 友だち全員への通知が目的。ユーザー ID を集める Webhook が不要になる |
 | D24 | GCP プロジェクトは `kototech-line-ops` / `kototech-line-dev` / `kototech-line-prod`、リージョンは `asia-northeast1`、state バケットは `kototech-line-notification-tfstate`(ops)。3 プロジェクトは同じ課金アカウントに紐付け済み | 作成済み(組織なし。個人アカウントのトップレベルのプロジェクト) |
+| D25 | LINE のアクセストークンは**ステートレスなチャネルアクセストークン**(約 15 分)を使い、アプリ(`infrastructure/line` の認証トランスポート)が実行のたびに自動で発行・再発行する。アクセストークンは保管しない。注入するのは `LINE_CHANNEL_SECRET`(Secret Manager)と `LINE_CHANNEL_ID`(Terraform の変数) | 人手のローテーションによるミスを避ける。チャネルシークレットの再発行だけは手作業(02-infra.md) |

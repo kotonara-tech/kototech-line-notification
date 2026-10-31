@@ -34,7 +34,7 @@ Cloud Run は **Job** として使う。HTTP エンドポイントを持たず�
 | --- | --- |
 | Cloud Scheduler | 毎分、Cloud Run Job を起動する(Scheduler のジョブは 1 つ。無料枠内) |
 | Cloud Run Job (Go, `backend/`) | 工程表を読み、開始間近のプログラムを判定し、LINE へ送信し、通知済みを工程表へ記録する |
-| Secret Manager | LINE チャネルアクセストークン等の秘匿情報 |
+| Secret Manager | LINE チャネルシークレット等の秘匿情報(アクセストークンは保管せず、アプリが実行のたびに発行する) |
 | Sheets API | 工程表の読み書き |
 | LINE Messaging API | メッセージ送信 |
 

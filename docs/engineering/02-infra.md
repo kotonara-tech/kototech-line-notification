@@ -53,7 +53,7 @@ infra/terraform/
 2. ~~`bootstrap/` で `terraform apply`(ops に state バケットを作成し、自分のアカウントに権限を付与)~~(済。バケット `kototech-line-notification-tfstate`、`asia-northeast1`)
 3. `env/dev` で `terraform init` → `apply`(人が手元の権限で実行。OIDC ができるまで CI は使えない)
 4. 出力された値(`workload_identity_provider`、`deployer_service_account`、`artifact_registry_repository_url`)を GitHub Actions に設定
-5. LINE のチャネルアクセストークン(`line-channel-access-token`)とチャネルシークレット(`line-channel-secret`)の**本物の値**を、環境ごとに別の version として登録する。Terraform は Secret の入れ物と仮の version(`CHANGE_ME`)だけを作る(version が 0 件だと Cloud Run Job を作成できないため)。値は state に残さないよう Terraform 外から登録する(`printf %s "<値>" | gcloud secrets versions add <secret-id> --data-file=- --project=<プロジェクト ID>`)。Cloud Run が環境変数として注入するため、アプリは Secret Manager の API を呼ばない
+5. LINE のチャネルシークレット(`line-channel-secret`)の**本物の値**を、環境ごとに別の version として登録する。アクセストークンは保管せず、アプリが `LINE_CHANNEL_ID`(Terraform の変数 `line_channel_id`)とシークレットから、実行のたびにステートレスなトークンを発行する。Terraform は Secret の入れ物と仮の version(`CHANGE_ME`)だけを作る(version が 0 件だと Cloud Run Job を作成できないため)。値は state に残さないよう Terraform 外から登録する(`printf %s "<値>" | gcloud secrets versions add line-channel-secret --data-file=- --project=<プロジェクト ID>`)。Cloud Run が環境変数として注入するため、アプリは Secret Manager の API を呼ばない
 6. 出力された `runtime_service_account` のメールを、工程表スプレッドシートの共有先(編集者)に追加
 7. 最初のデプロイ後、Environment の variable `SCHEDULER_PAUSED` を `false` にして、`deploy-to-*` を再実行する(Scheduler を有効化)
 8. prod も同様に実施
@@ -130,6 +130,7 @@ infra/terraform/
 | `CLOUD_RUN_JOB_NAME` | 出力 `cloud_run_job_scan` |
 | `GCP_PROJECT_ID` | その環境の GCP プロジェクト ID(Terraform の `project_id`) |
 | `REGION` | `asia-northeast1` など(未設定なら `asia-northeast1`) |
+| `LINE_CHANNEL_ID` | その環境で使う LINE チャネルの ID(Terraform の `line_channel_id`) |
 | `SPREADSHEET_ID` | その環境の工程表のスプレッドシート ID(Terraform の `spreadsheet_id`、dev ではインテグレーションテストにも使う) |
 | `SCHEDULER_PAUSED` | Scheduler を一時停止するか。未設定なら `true`。最初のデプロイ後に `false` にする |
 | `APP_ENV` | インテグレーションテスト用(dev のみ) |
@@ -172,3 +173,12 @@ GitHub Actions 用の `github-deployer` には、プロジェクトレベルで�
 - PR 上での `terraform plan`(prod は Workload Identity の条件で不可。dev のみ可能)
 - 通知失敗のアラート(Cloud Monitoring)
 - 詳細は [00-openquestion.md](00-openquestion.md)
+
+## LINE チャネルシークレットの再発行(手作業)
+
+アクセストークンは自動で発行されるため、人が行う更新作業はない。チャネルシークレットを再発行する(漏洩の疑いなど)ときだけ、次の手順を踏む。
+
+1. LINE Developers コンソールで、対象環境のチャネルシークレットを再発行する(古い値はすぐに使えなくなる可能性がある)
+2. すぐに、新しい値を Secret Manager に新しい version として追加する
+3. 次の Job の実行から、`latest` の新しい値が使われる(再デプロイは不要)
+4. 切り替えの間に Job が失敗しても、次の分の実行で復旧する(失敗は終了コード 1 で記録される)

@@ -15,7 +15,8 @@ description: Go 言語のベストプラクティスと、このプロジェク�
 - Cloud Run **Job** として動く。HTTP サーバではない。将来 API を足せるよう、エントリポイントで環境変数 `ROLE`(`scan` / 将来 `api`)により役割を切り替える
 - ビルドする Go バイナリ(イメージ)は **1 つだけ**
 - 構成は DDD。依存は `domain` ← `application` ← `infrastructure` / `interfaces` の一方向。`domain` は標準ライブラリのみに依存する
-- 秘匿情報(LINE のトークンなど)は Secret Manager から**環境変数として注入**される。アプリは Secret Manager の API を呼ばない
+- 秘匿情報(LINE のチャネルシークレット)は Secret Manager から**環境変数として注入**される。アプリは Secret Manager の API を呼ばない
+- LINE のアクセストークンは**保管せず**、`infrastructure/line` の認証トランスポート(`http.RoundTripper`)が、ステートレスなトークンを自動で発行・再発行して `Authorization` に付ける。ユースケースやドメインはトークンを意識しない
 - LINE への送信は **broadcast**(全友だち)。送信先の概念をドメインに持たない
 
 ## 構成と依存の向き
