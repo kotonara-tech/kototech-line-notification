@@ -13,6 +13,11 @@
 | Q11 | Job の実行が重なった場合の排他 | 前回の実行が長引くと次の分の実行と重なる。冪等性で防ぐか、排他を入れるか |
 | Q14 | dev / prod 用のテストスプレッドシート・LINE チャネル(チャネル ID・チャネルシークレット)の用意 | 環境は分ける(D8) |
 | Q17 | 失敗時のアラート(Cloud Monitoring)の要否と通知先 | Q7 と関連 |
+| Q20 | Environment `prod` の承認者(Required reviewers)を設定するか。設定するなら誰か。しないなら、ドキュメントの「承認あり」を直すか | 2026-11-01 に `gh api` で確かめたところ、`prod` も `dev` も `protection_rules` が空(`deployment_branch_policy` は `null`)。D16・D22、[01-operations.md](../operations/01-operations.md)、[02-infra.md](02-infra.md) の「CD」は、承認ありを前提にしている。未設定のままだと、リリース PR のマージの直後に、承認なしで prod へ反映される。D18(PR の Approve)と関連。[03-release.md](../operations/03-release.md) |
+| Q21 | リリース PR(`develop` → `main`)のタイトル・本文の書き方。D34 の「必ず Issue と関連付ける」「1 PR で閉じるのは 1 Issue まで」を適用するか、リリース PR は例外にするか | リリース PR は複数の変更を含むため、1 Issue に紐付けにくい。v1.0.0 のリリース PR(#1)は、プレフィックスも `Closes` もなしでマージされた。決まったら、[01-operations.md](../operations/01-operations.md) の PR の節に例外を書き、[03-release.md](../operations/03-release.md) の手順 1 は、リンクだけにする |
+| Q22 | バージョン番号(`vMAJOR.MINOR.PATCH`)を、どの変更で上げるか。Milestone 名(`v1.0.1` など)との対応 | D17。SemVer とだけ書いていて、上げる基準がない。hotfix は PATCH を上げる([01-operations.md](../operations/01-operations.md) の「リリースとバージョニング」) |
+| Q23 | prod を前の状態に戻す(ロールバック)手順 | 専用の手順はない。[03-release.md](../operations/03-release.md) は、問題の変更を取り消す修正を、通常のリリースか hotfix で出すとしている。イメージとインフラ(state)をどう戻すかは、検証していない |
+| Q24 | リリース後に、prod の LINE へ通知が届くことを確かめる手順 | [01-operations.md](../operations/01-operations.md) のリリースフローの手順 6「prod の動作を確認する」のうち、GCP 側の状態は [03-release.md](../operations/03-release.md) の「確認」にある。LINE に届いた通知を確かめる手順は未整備。通知は友だち全員に届く(D23)ため、どの通知で確かめるかの決めが要る |
 
 ## 決定
 
