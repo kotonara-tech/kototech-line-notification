@@ -57,7 +57,7 @@ make verify
 | 対象 | ルール |
 | --- | --- |
 | ドキュメント | 相対リンクが存在する / 参照する `Q` `D` の番号が `00-openquestion.md` にある / 廃止した用語(`TASK`、`LINE_CHANNEL_ACCESS_TOKEN` など)が残っていない / `docs/README.md` が 100 行以内 |
-| yml | タブ文字がない / 呼ぶ reusable workflow が存在する / **呼び出し先が `id-token: write` を要求するとき、呼び出し側も許可している** / `needs` が存在するジョブを指す / **`working-directory` があるジョブで、`checkout` より前に `run` していない** / 使う `vars.*` が `02-infra.md` の表にある / `terraform apply` するワークフローが必須の変数を `TF_VAR_*` で渡す / `apply` を `cancel-in-progress: true` で中断しない |
+| yml | タブ文字がない / 呼ぶ reusable workflow が存在する / 呼ぶローカル action(`uses: ./.github/actions/*`)に `action.yml` がある / **呼び出し先が `id-token: write` を要求するとき、呼び出し側も許可している** / `needs` が存在するジョブを指す / **`working-directory` があるジョブで、`checkout` より前に `run` していない** / 使う `vars.*` が `02-infra.md` の表にある / `terraform apply` するワークフローが必須の変数を `TF_VAR_*` で渡す / `apply` を `cancel-in-progress: true` で中断しない |
 
 ## GitHub Actions の論理検証
 
@@ -89,6 +89,10 @@ Actions はローカルで動かせない(`act` も、WIF・Environment・承認
 
 **C. 変数・Environment・コンテキスト**
 - 使う `vars.*` は、GitHub に**実際に登録されているか**。値は正しいか(空、**先頭・末尾の空白**、別環境の値)。→ `gh variable list --env <env>` で確かめる
+- 前後の空白は、目で見ても分からない。次のコマンドで、空白のある変数の**名前だけ**を出す(何も出なければ問題なし)。リポジトリの変数は `--env` を外す。デプロイの最初の手順(`.github/actions/check-vars`)も同じ検査をするが、手元で先に確かめる
+  ```
+  gh variable list --env <env> --json name,value | jq -r '.[] | select(.value | test("\\A\\s|\\s\\z")) | .name'
+  ```
 - `${{ vars.X || '既定' }}` は、未設定と空文字の両方で既定になる。空白だけの値は、既定にならない
 - Environment の承認(Required reviewers)は、**ジョブごと**に求められる。承認が何回入るか
 - PR のとき `github.ref` は `refs/pull/N/merge`。WIF の `attribute_condition`(prod は `refs/heads/main` のみ)に、**合うか**

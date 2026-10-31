@@ -28,6 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 変数の値の前後に空白がないかを、最初に確認する(ローカル action は、リポジトリの取得後でないと見つからない)
+      - uses: ./.github/actions/check-vars
+        with:
+          vars-json: ${{ toJSON(vars) }}
+
       # リポジトリを取得したあとで確認する(ジョブ全体の working-directory が backend のため、取得前は存在しない)
       - name: 必須の変数を確認する
         env:

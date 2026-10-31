@@ -45,6 +45,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 変数の値の前後に空白がないかを、最初に確認する(ローカル action は、リポジトリの取得後でないと見つからない)
+      - uses: ./.github/actions/check-vars
+        with:
+          vars-json: ${{ toJSON(vars) }}
+
       # 認証情報は ADC として扱われる(GOOGLE_APPLICATION_CREDENTIALS)。
       # Terraform の google provider と GCS backend の両方がこれを使う
       - uses: google-github-actions/auth@v2

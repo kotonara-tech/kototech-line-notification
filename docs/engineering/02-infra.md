@@ -145,6 +145,7 @@ infra/terraform/
 - イメージは `<リポジトリ URL>/notifier:<コミット SHA>` でタグ付けする。Job の環境変数・Secret は Terraform の管理で、CD はイメージだけを更新する
 - Terraform は GitHub Actions から実行する(D22)。`reusable-infra-deploy.yml` が `plan` の結果を保存し、**そのプランをそのまま `apply`** する。`plan` の内容はジョブのサマリに出力される
 - Terraform の変数(`project_id` など)は、tfvars をコミットしないため、Environment の variables を `TF_VAR_*` として渡す
+- 変数の値の前後に空白があると、別の値として扱われる(prod の `GCP_PROJECT_ID` で実際に起きた)。`reusable-infra-deploy` / `reusable-deploy-backend` / `reusable-integration-test` は、`checkout` の直後に composite action `.github/actions/check-vars` で全変数を検査し、前後に空白のある変数名を示して失敗する(値は出さない)
 - `deploy-to-*` の順序は **QA → インフラ → アプリのデプロイ**。Cloud Run Job や Artifact Registry を Terraform が先に作ってから、イメージを更新する
 - Environment `prod` の承認は、ジョブごとに求められるため、prod では「インフラ」と「アプリのデプロイ」で 2 回承認する。承認前に `plan` を確認する形に分けたい場合は、承認を挟まない plan 専用の Environment を別に用意する方法がある(未実施)
 - PR 上での `plan` は未実装(`ci.yml` には含めていない)。`reusable-infra-deploy.yml` の `apply: false` で追加できる
