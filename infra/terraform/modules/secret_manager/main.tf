@@ -8,6 +8,8 @@
 # 管理し続けると、リソースの作り直し(destroy → create)で「CHANGE_ME」が新しい version
 # として作られて latest になり、本物の値を上書きしてしまう。そのため、本物の値を登録した
 # Secret は placeholder_secret_ids から外して、仮の version をコードから外す。
+# これで防げるのは、Secret はそのままで version だけが作り直される場合まで。Secret 自体の
+# 作り直しでは version がすべて消える(Job は作り直されず、apply は成功する)ので、plan で読む。
 
 locals {
   # 未指定(null)なら、すべての Secret に仮の version を作る(新しい環境の初回の apply)
@@ -32,8 +34,15 @@ resource "google_secret_manager_secret_version" "placeholder" {
   secret      = google_secret_manager_secret.this[each.key].id
   secret_data = var.placeholder_value
 
-  # 値は Terraform の管理外。仮の値の変更でバージョンが作り直されないようにする
   lifecycle {
+    # 値は Terraform の管理外。仮の値の変更でバージョンが作り直されないようにする
     ignore_changes = [secret_data]
+
+    # ID の typo や空白(例: " line-channel-secret")は、参照の段階で「Invalid index」になり、
+    # 原因が分かりにくい。何が悪いかを先に伝える
+    precondition {
+      condition     = contains(var.secret_ids, each.key)
+      error_message = "placeholder_secret_ids には、secret_ids の中の ID だけを入れてください(「${each.key}」は secret_ids にありません。前後の空白や typo を確認してください)。"
+    }
   }
 }

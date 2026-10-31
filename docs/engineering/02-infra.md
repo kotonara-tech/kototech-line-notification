@@ -55,9 +55,11 @@ infra/terraform/
 4. 出力された値(`workload_identity_provider`、`deployer_service_account`、`artifact_registry_repository_url`)を GitHub Actions に設定
 5. LINE のチャネルシークレット(`line-channel-secret`)の**本物の値**を、環境ごとに別の version として登録する。アクセストークンは保管せず、アプリが `LINE_CHANNEL_ID`(Terraform の変数 `line_channel_id`)とシークレットから、実行のたびにステートレスなトークンを発行する。Terraform は Secret の入れ物と、**初回のための**仮の version(`CHANGE_ME`)だけを作る(version が 0 件だと Cloud Run Job を作成できないため)。値は state に残さないよう Terraform 外から登録する(`printf %s "<値>" | gcloud secrets versions add line-channel-secret --data-file=- --project=<プロジェクト ID>`)。Cloud Run が環境変数として注入するため、アプリは Secret Manager の API を呼ばない
    - 本物の値を登録したら、`env/<環境>/main.tf` の `module "secret_manager"` の `placeholder_secret_ids` から、その Secret を外して(空のリスト `[]` にして)`apply` する。仮の version がコードから外れ、Terraform は破棄するだけで、作らなくなる。外さないと、リソースの作り直し(`-replace`、`tainted` など)で `CHANGE_ME` が新しい version として作られて `latest` になり、本物の値を上書きする
-   - **登録が先、外すのが後**。先に外すと、唯一の version(`CHANGE_ME`)が破棄される。事前に `gcloud secrets versions list line-channel-secret --project=<プロジェクト ID>` で、本物の version が `enabled` であることを確かめる(値は読まない)
+   - **登録が先、外すのが後**。先に外すと、唯一の version(`CHANGE_ME`)が破棄されて、version が 0 件になる(破棄した version は戻せない)。事前に確かめる(値は読まない)
+     - `gcloud secrets versions list line-channel-secret --project=<プロジェクト ID>` で、**仮の version(CREATED が最も古い、通常は version 1)より後に作られた `enabled` の version が 1 件以上ある**こと。一覧は番号・状態・作成日時だけで、仮の version と本物は区別できない。version が 1 件だけなら、それは仮の version なので、外さない
+     - `plan` で破棄されるのが、仮の version の 1 件(上の一覧で最も古い番号)だけで、Secret・Job・IAM に差分がないこと
    - 仮の version が要るのは、Secret に version がない間だけ(新しい環境の初回の `apply`、新しい Secret を足すとき)。そのときだけ、**その Secret の ID だけ**を `placeholder_secret_ids` に入れる。本物の値がある Secret を入れると、仮の version が新しい `latest` になり、上書きされる
-   - Secret 自体が破棄・作り直されると、version もすべて消える。この設定では防げないため、`apply` の前に plan で `google_secret_manager_secret` の `destroy` / `replace` が含まれないかを読む
+   - この設定で守れるのは、「Secret はそのままで、version だけが作り直される」場合(手動の `-replace`、`tainted` など)に限る。Secret 自体が破棄・作り直されると、version はすべて消える。Secret の ID は変わらないため、Job や IAM に差分は出ず、`apply` は**黙って成功して**、version が 0 件の Secret が残る(失敗に気づくのは、Scheduler が Job を実行するとき)。`apply` の前に plan で `google_secret_manager_secret` の `destroy` / `replace` が含まれないかを読む
 6. 出力された `runtime_service_account` のメールを、工程表スプレッドシートの共有先(編集者)に追加
    - デプロイ用サービスアカウントには、**共有しない**。インテグレーションテストは、デプロイ用アカウントが実行用アカウントを借りて(Terraform が dev のみ、`serviceAccountTokenCreator` を付与)、実行用アカウントとして読むため(D31)
 7. 最初のデプロイ後、Environment の variable `SCHEDULER_PAUSED` を `false` にして、`deploy-to-*` を再実行する(Scheduler を有効化)
