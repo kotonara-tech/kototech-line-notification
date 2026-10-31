@@ -55,6 +55,41 @@ flowchart LR
 - **作業は、必ず Issue から始める**。Issue がなければ、先に立てる(Issue がないと、ブランチ名を決められない)
 - 作業ブランチは、マージ後に削除する(自動削除は有効にしていない。リリース PR の `develop` を、消さないため)
 
+## Git の設定と force push
+
+### 必須の git config
+
+開発を始める前に、**全員が**次の 2 つを設定する(`--global` なので、マシンごとに 1 回)。
+
+```sh
+git config --global --add merge.ff false
+git config --global --add pull.ff only
+```
+
+| 設定 | 動き | 目的 |
+| --- | --- | --- |
+| `merge.ff false` | `git merge` で、fast-forward できる場合も、常にマージコミットを作る | 開発者ごとの Git 設定の違いで、履歴の形が変わらないようにする |
+| `pull.ff only` | `git pull` は、fast-forward できる場合だけ許可する(`git pull` では `merge.ff` より優先される) | 意図しないマージコミットやリベースを防ぐ |
+
+- 分岐していて fast-forward できないとき、`git pull` は `fatal: Not possible to fast-forward, aborting.` で止まる。`git merge` か `git rebase` を、自分で選んで実行する
+- `--add` は、再実行すると**同じ値を重複して追加する**。設定済みかは `git config --global --get-all merge.ff` と `git config --global --get-all pull.ff` で確かめる(それぞれ `false`・`only` が 1 行だけ出れば正しい)
+- 重複を避けたいときは、`--add` を外す(`git config --global merge.ff false`)。再実行しても 1 つのまま
+- すでに重複しているとき、`--add` なしは `error: cannot overwrite multiple values with a single value` で失敗する。`git config --global --replace-all merge.ff false` で 1 つにまとめる
+
+### force push
+
+force push が必要なときは、`--force` ではなく **`--force-with-lease`** を使う。
+
+```sh
+git push --force-with-lease origin <作業ブランチ名>
+```
+
+- `--force-with-lease` は、リモートのブランチが、手元の `origin/<作業ブランチ名>`(最後に取得した状態)と同じときだけ上書きする。**他の人が push したコミットは上書きされず**、push は `(stale info)` で拒否される。`--force` は、この確認をせずに上書きする
+- 拒否されたら、`--force` に切り替えない。`git fetch` で相手の変更を確かめ、取り込んでからやり直す
+- force push が必要になるのは、push 済みの作業ブランチの履歴を書き換えたとき(`git rebase`、`git commit --amend` など)
+- 対象は、**自分の作業ブランチだけ**。`develop` と `main` は、Ruleset で force push を禁止している(「ブランチ保護」)ので、押せない。作業ブランチには保護がなく、`--force` でも通ってしまうため、使い分けをここで決める
+- 裏で `git fetch` を自動実行するツール(エディタなど)があると、見ていない更新も取得済みとして扱われ、保護が効かない(`git push --help` の `--force-with-lease`)
+
 ## 通常の開発フロー(フェーズ 2)
 
 フェーズ 1 では、手順 1〜4 を省略して `develop` へ直接 push してよい(QA は push 後の `deploy-to-dev` で走る)。

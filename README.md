@@ -20,6 +20,16 @@
 - 配信メッセージは、MVP ではテキストメッセージの broadcast(文面のテンプレートは固定)。Flex Message 化は今後の候補で、`docs/mocks/` で設計してから行う
 - 詳細な設計は [docs/](docs/README.md) を参照
 
+## 開発を始めるとき
+
+運用ルールの詳細は [docs/operations/01-operations.md](docs/operations/01-operations.md)。
+
+1. リポジトリを取得する: `git clone https://github.com/kotonara-tech/kototech-line-notification.git`
+2. 必須の `git config`(`merge.ff` と `pull.ff`)を設定する。コマンドと目的、`--force-with-lease` のルールは [Git の設定と force push](docs/operations/01-operations.md#git-の設定と-force-push)
+3. 作業は Issue から始める。`develop` から作業ブランチを切る(名前の付け方は「作業ブランチ」)
+4. コミット・push の前に、`make verify` を実行して、失敗を 0 にする
+5. `develop` へ PR を作る(「通常の開発フロー(フェーズ 2)」)
+
 ## ステータス
 
 初期セットアップ中。
