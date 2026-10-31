@@ -65,6 +65,17 @@ resource "google_cloud_run_v2_job" "this" {
   }
 }
 
+# 指定した主体が、実行用サービスアカウントのトークンを発行(借用)できるようにする。
+# CI のインテグレーションテストが、本番の Job と同じ主体として工程表を読めるかを確認するために使う。
+# 工程表や Secret へのアクセスを広げることになるため、必要な環境(dev)でだけ指定する。
+resource "google_service_account_iam_member" "token_creator" {
+  for_each = toset(var.token_creator_members)
+
+  service_account_id = google_service_account.runtime.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = each.value
+}
+
 # 実行用サービスアカウントに、参照する Secret の読み取り権限を付与する
 resource "google_secret_manager_secret_iam_member" "runtime_accessor" {
   for_each = toset(values(var.secret_env_vars))

@@ -2,15 +2,6 @@ name: reusable-qa
 
 on:
   workflow_call:
-    inputs:
-      run-integration:
-        description: dev 環境の実 API を使うインテグレーションテストも実行する
-        type: boolean
-        default: false
-      integration-environment:
-        description: インテグレーションテストで使う GitHub Environment(run-integration が true のとき必須)
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -63,34 +54,3 @@ jobs:
             terraform -chdir="$dir" validate
           done
         working-directory: infra/terraform
-
-  integration:
-    name: backend (integration-test)
-    if: inputs.run-integration
-    needs: backend
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.integration-environment }}
-    permissions:
-      contents: read
-      id-token: write
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-
-      # 認証情報は ADC として扱われる(GOOGLE_APPLICATION_CREDENTIALS)
-      - uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
-
-      - run: make integration-test
-        env:
-          APP_ENV: ${{ vars.APP_ENV }}
-          SPREADSHEET_ID: ${{ vars.SPREADSHEET_ID }}

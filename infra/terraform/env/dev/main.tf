@@ -46,6 +46,9 @@ module "cloud_run_job_scan" {
   name                = "line-notifier-scan"
   deletion_protection = false
 
+  # CI のインテグレーションテストが、実行用サービスアカウントとして工程表を読むため(dev のみ)
+  token_creator_members = ["serviceAccount:${module.github_oidc.deployer_service_account}"]
+
   # 同一バイナリを環境変数で切り替える。ROLE がこのプロセスの役割を決める
   env_vars = {
     APP_ENV             = local.env

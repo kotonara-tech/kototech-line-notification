@@ -45,3 +45,9 @@ variable "deletion_protection" {
   type    = bool
   default = true
 }
+
+variable "token_creator_members" {
+  description = "実行用サービスアカウントのトークンを発行(借用)できる主体(例: serviceAccount:...)。既定は空"
+  type        = list(string)
+  default     = []
+}

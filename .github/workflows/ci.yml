@@ -14,6 +14,3 @@ concurrency:
 jobs:
   qa:
     uses: ./.github/workflows/reusable-qa.yml
-    permissions: # 呼び出し先の integration ジョブが id-token を宣言しているため、許可しておく(未実行)
-      contents: read
-      id-token: write

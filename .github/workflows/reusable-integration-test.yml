@@ -1,0 +1,61 @@
+name: reusable-integration-test
+
+# 実際の Google Sheets を、本番の Job と同じ「実行用サービスアカウント」として読めることを確認する(読み取りのみ)。
+# 実行用サービスアカウントを借りるための権限は、Terraform(インフラの適用)が作るため、
+# このワークフローは、インフラの適用のあとに実行する。
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 対象の GitHub Environment(dev)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: backend (integration-test)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: 必須の変数を確認する
+        env:
+          RUNTIME_SERVICE_ACCOUNT: ${{ vars.RUNTIME_SERVICE_ACCOUNT }}
+          SPREADSHEET_ID: ${{ vars.SPREADSHEET_ID }}
+        run: |
+          missing=0
+          for name in RUNTIME_SERVICE_ACCOUNT SPREADSHEET_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Environment の variable ${name} が未設定"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # 認証情報は ADC として扱われる(GOOGLE_APPLICATION_CREDENTIALS)。主体は、デプロイ用サービスアカウント
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
+
+      # テストは、デプロイ用サービスアカウントを足がかりに、実行用サービスアカウントを借りて工程表を読む
+      - run: make integration-test
+        env:
+          APP_ENV: ${{ vars.APP_ENV }}
+          SPREADSHEET_ID: ${{ vars.SPREADSHEET_ID }}
+          IMPERSONATE_SERVICE_ACCOUNT: ${{ vars.RUNTIME_SERVICE_ACCOUNT }}

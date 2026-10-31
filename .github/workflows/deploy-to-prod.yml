@@ -15,9 +15,6 @@ jobs:
   qa:
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-qa.yml
-    permissions: # 呼び出し先の integration ジョブが id-token を宣言しているため、許可しておく(未実行)
-      contents: read
-      id-token: write
 
   # Job 本体(Terraform 管理)が存在する状態でイメージを更新するため、インフラを先に適用する
   infra:
