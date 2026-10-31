@@ -32,7 +32,7 @@ MVP は「起動して処理し、終了する」Cloud Run Job として動か�
 | `APP_ENV` | `dev` / `prod` | 常に必須 | Terraform(平文) |
 | `SPREADSHEET_ID` | 工程表のスプレッドシート ID | `ROLE=scan` のとき必須 | Terraform(平文) |
 | `LINE_CHANNEL_ACCESS_TOKEN` | LINE チャネルアクセストークン | 送信する ROLE で必須 | Secret Manager |
-| `LINE_CHANNEL_SECRET` | LINE チャネルシークレット(Webhook の署名検証用) | `ROLE=api` で Webhook を受けるとき必須 | Secret Manager |
+| `LINE_CHANNEL_SECRET` | LINE チャネルシークレット(Webhook の署名検証用) | `ROLE=scan` では任意(未使用)。`ROLE=api` で Webhook を受けるとき必須 | Secret Manager |
 | `PORT` | 待ち受けポート | `ROLE=api` のとき | Cloud Run が設定 |
 
 - 切り替えの環境変数は **`ROLE` に一本化**する。Job でも `ROLE` を使い、`TASK` のような別の切り替え変数は持たない
@@ -41,7 +41,7 @@ MVP は「起動して処理し、終了する」Cloud Run Job として動か�
 
 - `LINE_CHANNEL_ACCESS_TOKEN`、`LINE_CHANNEL_SECRET` などの秘匿情報は **Secret Manager に保管し、Cloud Run が環境変数として注入**する(Terraform の `secret_env_vars`)
 - アプリは Secret Manager の API を呼ばない。環境変数を読むだけにする(SDK 依存と権限が増えない)
-- 注入するのは、その Job / サービスが実際に使う Secret だけにする(最小権限)。`ROLE=scan` の Job には `LINE_CHANNEL_ACCESS_TOKEN` のみ。`LINE_CHANNEL_SECRET` は Webhook を受ける `ROLE=api` を追加するときに注入する
+- 原則は、その Job / サービスが実際に使う Secret だけを注入する(最小権限)。`ROLE=scan` の Job には `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_CHANNEL_SECRET` の両方を注入している(チャネルシークレットは、将来の Webhook 署名検証に備えて先に注入済み)。`scan` はチャネルシークレットを使わないため、config では**任意**として扱い、未設定でもエラーにしない
 - 秘匿情報はログに出さない。config では専用の型(`String()` / JSON 出力をマスクする)で保持する
 
 ### ROLE による切り替え

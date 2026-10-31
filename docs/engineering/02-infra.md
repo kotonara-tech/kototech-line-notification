@@ -12,9 +12,9 @@ GCP プロジェクトは **ops / dev / prod の 3 つ**に分ける(プロジ�
 
 | プロジェクト | 用途 | 置くもの | state の prefix |
 | --- | --- | --- | --- |
-| ops | 運用基盤 | Terraform state の GCS バケットのみ | (バケット自体は bootstrap の state) |
-| dev | 開発・検証 | アプリのリソース一式(テスト用スプレッドシート / LINE チャネル) | `env/dev` |
-| prod | 本番 | アプリのリソース一式 | `env/prod` |
+| ops(`kototech-line-ops`) | 運用基盤 | Terraform state の GCS バケットのみ | (バケット自体は bootstrap の state) |
+| dev(`kototech-line-dev`) | 開発・検証 | アプリのリソース一式(テスト用スプレッドシート / LINE チャネル) | `env/dev` |
+| prod(`kototech-line-prod`) | 本番 | アプリのリソース一式 | `env/prod` |
 
 - dev と prod は、リソース名・Workload Identity Pool が衝突しないよう、環境ごとにプロジェクトを分ける
 - ops を分けるのは、dev / prod のどちらを消しても state が失われないようにするため
@@ -49,11 +49,11 @@ infra/terraform/
 
 ### 初回セットアップ手順
 
-1. ops / dev / prod の GCP プロジェクトを作成し、共通の課金アカウントを紐付ける
-2. `bootstrap/` で `terraform apply`(ops に state バケットを作成し、自分のアカウントに権限を付与)
+1. ~~ops / dev / prod の GCP プロジェクトを作成し、共通の課金アカウントを紐付ける~~(済)
+2. ~~`bootstrap/` で `terraform apply`(ops に state バケットを作成し、自分のアカウントに権限を付与)~~(済。バケット `kototech-line-notification-tfstate`、`asia-northeast1`)
 3. `env/dev` で `terraform init` → `apply`(人が手元の権限で実行。OIDC ができるまで CI は使えない)
 4. 出力された値(`workload_identity_provider`、`deployer_service_account`、`artifact_registry_repository_url`)を GitHub Actions に設定
-5. LINE のチャネルアクセストークン(`line-channel-access-token`)とチャネルシークレット(`line-channel-secret`)を Secret Manager に登録(値は state に残さないため Terraform 外で `gcloud` 等から登録)。Cloud Run が環境変数として注入するため、アプリは Secret Manager の API を呼ばない
+5. LINE のチャネルアクセストークン(`line-channel-access-token`)とチャネルシークレット(`line-channel-secret`)の**本物の値**を、環境ごとに別の version として登録する。Terraform は Secret の入れ物と仮の version(`CHANGE_ME`)だけを作る(version が 0 件だと Cloud Run Job を作成できないため)。値は state に残さないよう Terraform 外から登録する(`printf %s "<値>" | gcloud secrets versions add <secret-id> --data-file=- --project=<プロジェクト ID>`)。Cloud Run が環境変数として注入するため、アプリは Secret Manager の API を呼ばない
 6. 出力された `runtime_service_account` のメールを、工程表スプレッドシートの共有先(編集者)に追加
 7. 最初のデプロイ後、Environment の variable `SCHEDULER_PAUSED` を `false` にして、`deploy-to-*` を再実行する(Scheduler を有効化)
 8. prod も同様に実施
@@ -66,7 +66,7 @@ infra/terraform/
 | `apis` | 必要な API の有効化 | `project_id` |
 | `github_oidc` | Workload Identity Pool / GitHub Provider / デプロイ用サービスアカウント / 権限付与 | `github_repository`, `allowed_ref`, `deployer_roles` |
 | `artifact_registry` | Docker リポジトリ(直近 10 世代を残す) | `name`, `keep_count` |
-| `secret_manager` | Secret(値は含まない) | `secret_ids` |
+| `secret_manager` | Secret の入れ物と仮の version(本物の値は含まない) | `secret_ids` |
 | `cloud_run_job` | Cloud Run Job / 実行用サービスアカウント / Secret 参照権限 | `name`, `env_vars`, `secret_env_vars`, `timeout`, `max_retries` |
 | `cloud_scheduler` | Scheduler ジョブ / Scheduler 用サービスアカウント / Job の invoker 権限 | `job_name`, `job_location`, `schedule`, `paused` |
 

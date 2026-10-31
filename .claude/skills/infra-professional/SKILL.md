@@ -76,7 +76,7 @@ infra/terraform/
 
 ### 秘匿情報
 
-- Secret Manager は **Secret の入れ物だけ**を Terraform で作る。値(version)は state に平文で残るため、Terraform 外(`gcloud secrets versions add`)で登録する
+- Secret Manager は **Secret の入れ物と仮の version(`CHANGE_ME`)だけ**を Terraform で作る(version が 0 件だと、参照する Cloud Run Job を作れないため)。本物の値は state に平文で残るため、Terraform 外(`gcloud secrets versions add`)で別の version として登録する
 - アプリへは Cloud Run が**環境変数として注入**する(`secret_key_ref`)。参照する SA に、その Secret への `secretAccessor` だけを付ける
 - 注入するのは、その Job / サービスが実際に使うものだけ
 - state にも機密が入りうる前提で、バケットを保護する(公開アクセス禁止、バージョニング、アクセスできる主体を限定)
@@ -95,6 +95,8 @@ infra/terraform/
 3. `plan` の差分を読む。**作り直し(replace)と削除(destroy)を特に探す**。意図しない差分があれば原因を調べてから進める
 4. CI では plan を保存し、その**保存したプランをそのまま `apply`** する(plan と apply の間で内容がずれない)
 5. prod は `main` からのみ。Environment の承認を挟む
+
+作成時にエラーが出ても、リソース自体は作られて健全なことがある(IAM の反映待ちなど)。Terraform はそのリソースを `tainted` にして、次の `apply` で**削除して作り直そうとする**。`deletion_protection` が有効だと削除で止まるため、先に実体の状態(`gcloud` で確認)を見て、健全なら `terraform untaint` で印を外してから `plan` を確認する。
 
 注意: WIF のプール・SA・IAM 自体を変更する `apply` は、実行中の認証を壊す恐れがある。差分を必ず確認する。
 
