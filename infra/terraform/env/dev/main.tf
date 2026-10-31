@@ -48,10 +48,11 @@ module "cloud_run_job_scan" {
 
   # 同一バイナリを環境変数で切り替える。ROLE がこのプロセスの役割を決める
   env_vars = {
-    APP_ENV         = local.env
-    ROLE            = "scan"
-    SPREADSHEET_ID  = var.spreadsheet_id
-    LINE_CHANNEL_ID = var.line_channel_id
+    APP_ENV             = local.env
+    ROLE                = "scan"
+    SPREADSHEET_ID      = var.spreadsheet_id
+    LINE_CHANNEL_ID     = var.line_channel_id
+    NOTIFY_LEAD_MINUTES = tostring(var.notify_lead_minutes)
   }
 
   # アクセストークンは保管しない。アプリが LINE_CHANNEL_ID と LINE_CHANNEL_SECRET から、

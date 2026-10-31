@@ -16,7 +16,9 @@ permissions:
   contents: read
 
 env:
-  GOLANGCI_LINT_VERSION: v2.1.6
+  # backend/go.mod の Go バージョンを上げるときは、それを解析できるバージョンに更新する
+  # (古い golangci-lint は、新しい Go のコードを解析できず lint が失敗する)
+  GOLANGCI_LINT_VERSION: v2.13.2
   TERRAFORM_VERSION: 1.15.7
 
 jobs:

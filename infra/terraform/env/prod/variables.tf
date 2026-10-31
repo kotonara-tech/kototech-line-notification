@@ -24,6 +24,12 @@ variable "line_channel_id" {
   type        = string
 }
 
+variable "notify_lead_minutes" {
+  description = "プログラムの開始の何分前から通知するか(アプリの環境変数 NOTIFY_LEAD_MINUTES)"
+  type        = number
+  default     = 10
+}
+
 variable "scheduler_paused" {
   description = "初回デプロイ前はイメージが placeholder のため、Scheduler を一時停止しておく"
   type        = bool
