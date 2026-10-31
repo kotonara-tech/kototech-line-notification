@@ -35,6 +35,10 @@ module "secret_manager" {
   project_id = var.project_id
   secret_ids = ["line-channel-secret"]
 
+  # 仮の version は初回の apply のためだけに要る。dev は本物の値を登録済みなので、1 つも作らない。
+  # 新しい Secret を足すときは、その Secret の ID だけを入れる(02-infra.md の初回セットアップ 5)
+  placeholder_secret_ids = []
+
   depends_on = [module.apis]
 }
 
