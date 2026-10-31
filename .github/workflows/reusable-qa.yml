@@ -1,0 +1,94 @@
+name: reusable-qa
+
+on:
+  workflow_call:
+    inputs:
+      run-integration:
+        description: dev 環境の実 API を使うインテグレーションテストも実行する
+        type: boolean
+        default: false
+      integration-environment:
+        description: インテグレーションテストで使う GitHub Environment(run-integration が true のとき必須)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  GOLANGCI_LINT_VERSION: v2.1.6
+  TERRAFORM_VERSION: 1.15.7
+
+jobs:
+  backend:
+    name: backend (test / lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_LINT_VERSION }}
+
+      - run: make test
+      - run: make lint
+
+  terraform:
+    name: terraform (fmt / validate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: fmt
+        run: terraform fmt -check -recursive
+        working-directory: infra/terraform
+
+      - name: validate
+        run: |
+          for dir in bootstrap env/dev env/prod; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+        working-directory: infra/terraform
+
+  integration:
+    name: backend (integration-test)
+    if: inputs.run-integration
+    needs: backend
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.integration-environment }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # 認証情報は ADC として扱われる(GOOGLE_APPLICATION_CREDENTIALS)
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - run: make integration-test
+        env:
+          APP_ENV: ${{ vars.APP_ENV }}
+          SPREADSHEET_ID: ${{ vars.SPREADSHEET_ID }}
