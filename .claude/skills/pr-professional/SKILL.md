@@ -20,7 +20,7 @@ PR を出すときに、**作る前から出すまでに確認する順番**を�
 | 3 | **本文**: `.github/pull_request_template.md` の項目を埋めたか。**先頭**に `Closes #番号`(必須)。**1 PR で閉じるのは 1 Issue まで**。ほかの Issue に関わる(閉じない)ときは `Ref #番号` | 「Issue・PR・コミットの書き方」の「PR」 |
 | 4 | **宛先とマージ方法**: 作業ブランチ → `develop` は**スカッシュ**。`main` 宛ては**マージコミット**(リリース PR は `develop` → `main`、hotfix の PR は `hotfix/*` → `main`)。hotfix のバックマージ(`main` → `develop`)は、`develop` 宛てなのでスカッシュ | 「ブランチ保護(Ruleset)」の「マージ方法(設定済み)」、「リリースフロー(prod)」、「hotfix フロー(フェーズ 2)」 |
 | 5 | **Milestone と担当者**: Issue と同じ Milestone を付けたか(Issue に無ければ、先に Issue に付ける)。担当者は、作成者自身にしたか | 「Issue・PR・コミットの書き方」の「PR」 |
-| 6 | **push**: force push が要るときは、`--force` ではなく `--force-with-lease`。必須の `git config` を設定済みか | 本体は、別の Issue(#19)で `01-operations.md` に書く。書かれたら、ここに節名を足す |
+| 6 | **push**: force push が要るときは、`--force` ではなく `--force-with-lease`。必須の `git config` を設定済みか | 「Git の設定と force push」(Issue #19 で追加) |
 | 7 | **レビュアー**: **自動ではリクエストしない**(通知が飛ぶため)。人が必要なときに指定する | 「Issue・PR・コミットの書き方」の「PR」 |
 
 - 手順 3・5 は、作業ブランチ → `develop` の PR の規則。**リリース PR は、閉じる Issue を持たないことがあるため、手順 3・5 の対象外**(`Closes` と Milestone の付け方は、本体に定めがない)
