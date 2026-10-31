@@ -1,10 +1,18 @@
 ---
 name: タスク
 about: やることを 1 つ決めて書く(機能の追加、修正、調査、設定の作業など)
-title: ""
+title: "【】"
 labels: ""
 assignees: ""
 ---
+
+<!--
+タイトルは、先頭に領域のプレフィックスを付ける(【】の中を、次のいずれかにする)。
+  【INFRA】 infra/(Terraform・GCP のリソース・権限)
+  【BE】    backend/(Go のアプリケーション)
+  【DOCS】  docs/、README.md、スキル(.claude/)
+  【CORE】  領域をまたぐ変更、GitHub Actions・リポジトリの設定・検証スクリプト など
+-->
 
 ## 背景
 
