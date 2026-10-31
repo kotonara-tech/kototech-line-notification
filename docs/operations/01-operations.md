@@ -58,7 +58,7 @@ flowchart LR
 2. 実装・設計ドキュメントの更新を行う(設計が変わる場合は `docs/engineering/` も同じ PR で更新)
 3. `develop` へ PR を作る。`ci`(QA)が通ることを確認する
 4. レビュー後、**squash merge** で `develop` へマージする
-5. `develop` への push で dev 環境へ自動デプロイされる(QA とインテグレーションテストを含む)
+5. `develop` への push で dev 環境へ自動デプロイされる(QA → インフラ → インテグレーションテスト → アプリのデプロイ)
 6. dev で動作を確認する
 
 ## リリースフロー(prod)

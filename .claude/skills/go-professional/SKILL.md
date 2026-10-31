@@ -131,7 +131,7 @@ backend/
 | --- | --- |
 | `make test` | `go test -race -cover ./...`(外部 API は叩かない) |
 | `make lint` | `go vet` と `golangci-lint` |
-| `make integration-test` | `-tags=integration`。dev 環境の実 API を使う。prod には実行しない |
+| `make integration-test` | `-tags=integration`。dev 環境の実 API を使う。prod には実行しない。CI では、実行用サービスアカウントを借りて(`IMPERSONATE_SERVICE_ACCOUNT`)、本番の Job と同じ主体で読む |
 | `make build` | `bin/notifier` を 1 つビルド(`CGO_ENABLED=0 -trimpath`) |
 
 - `golangci-lint` は v2 系。設定ファイル(`.golangci.yml`)を置くときは v2 の形式で書く

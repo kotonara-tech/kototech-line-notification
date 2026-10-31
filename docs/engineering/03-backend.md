@@ -288,7 +288,7 @@ backend/
 | --- | --- |
 | `make test` | ユニットテスト(`-race -cover`)。外部 API は叩かない |
 | `make lint` | `go vet` + `golangci-lint` |
-| `make integration-test` | `-tags=integration` のテスト。dev 環境の実 API を使う(ADC と環境変数が必要。prod に対しては実行しない) |
+| `make integration-test` | `-tags=integration` のテスト。dev 環境の実 API を使う(ADC と環境変数が必要。prod に対しては実行しない)。環境変数 `IMPERSONATE_SERVICE_ACCOUNT` に実行用サービスアカウントを指定すると、それを借りて読む(CI はこの形) |
 | `make build` | `bin/notifier` を 1 つビルド(`CGO_ENABLED=0`、`GOOS` / `GOARCH` で上書き可) |
 
 - ローカル実行は `ROLE=scan APP_ENV=dev SPREADSHEET_ID=... LINE_CHANNEL_ID=... LINE_CHANNEL_SECRET=... go run ./cmd/notifier` のように環境変数で切り替える

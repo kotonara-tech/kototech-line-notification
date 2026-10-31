@@ -55,7 +55,7 @@ infra/terraform/
 4. 出力された値(`workload_identity_provider`、`deployer_service_account`、`artifact_registry_repository_url`)を GitHub Actions に設定
 5. LINE のチャネルシークレット(`line-channel-secret`)の**本物の値**を、環境ごとに別の version として登録する。アクセストークンは保管せず、アプリが `LINE_CHANNEL_ID`(Terraform の変数 `line_channel_id`)とシークレットから、実行のたびにステートレスなトークンを発行する。Terraform は Secret の入れ物と仮の version(`CHANGE_ME`)だけを作る(version が 0 件だと Cloud Run Job を作成できないため)。値は state に残さないよう Terraform 外から登録する(`printf %s "<値>" | gcloud secrets versions add line-channel-secret --data-file=- --project=<プロジェクト ID>`)。Cloud Run が環境変数として注入するため、アプリは Secret Manager の API を呼ばない
 6. 出力された `runtime_service_account` のメールを、工程表スプレッドシートの共有先(編集者)に追加
-   - **dev のみ**: インテグレーションテスト(`deploy-to-dev` の QA で実行する、読み取りだけのテスト)のため、デプロイ用サービスアカウント(`github-deployer@<プロジェクト ID>.iam.gserviceaccount.com`)にも、**閲覧者**として共有する(D31)
+   - デプロイ用サービスアカウントには、**共有しない**。インテグレーションテストは、デプロイ用アカウントが実行用アカウントを借りて(Terraform が dev のみ、`serviceAccountTokenCreator` を付与)、実行用アカウントとして読むため(D31)
 7. 最初のデプロイ後、Environment の variable `SCHEDULER_PAUSED` を `false` にして、`deploy-to-*` を再実行する(Scheduler を有効化)
 8. prod も同様に実施
 9. GitHub Actions から Terraform を実行するため、dev / prod のデプロイ用サービスアカウント(`github-deployer@<プロジェクト ID>.iam.gserviceaccount.com`)を `bootstrap/` の `state_admins` に追加して再適用する(state バケットへの読み書き権限)
@@ -113,10 +113,11 @@ infra/terraform/
 | ファイル | 役割 | トリガー |
 | --- | --- | --- |
 | `ci.yml` | QA のみ | PR、手動 |
-| `reusable-qa.yml` | backend の `make test` / `make lint`、Terraform の `fmt` / `validate`。オプションで `make integration-test` | 他から呼び出し |
+| `reusable-qa.yml` | backend の `make test` / `make lint`、Terraform の `fmt` / `validate` | 他から呼び出し |
+| `reusable-integration-test.yml` | インテグレーションテスト(`make integration-test`)。**実行用サービスアカウントを借りて**、実際の工程表を読めることを確認する(読み取りのみ) | 他から呼び出し |
 | `reusable-infra-deploy.yml` | Terraform の `init` → `validate` → `plan` → `apply`(`apply: false` で plan のみ) | 他から呼び出し |
 | `reusable-deploy-backend.yml` | イメージのビルド → Artifact Registry へ push → Cloud Run Job のイメージ更新 | 他から呼び出し |
-| `deploy-to-dev.yml` | QA(インテグレーションテスト含む)→ インフラ(Terraform)→ アプリのデプロイ | `develop` への push、手動(任意のブランチ) |
+| `deploy-to-dev.yml` | QA → インフラ(Terraform)→ **インテグレーションテスト** → アプリのデプロイ | `develop` への push、手動(任意のブランチ) |
 | `deploy-to-prod.yml` | QA → インフラ(Terraform)→ アプリのデプロイ | `main` への push、手動。`main` 以外は拒否 |
 | `apply-to-dev.yml` | **インフラ(Terraform)だけ**を適用する。QA とアプリのデプロイはしない。`apply` を false にすると plan だけ | 手動のみ(任意のブランチ) |
 | `apply-to-prod.yml` | 同上(prod)。`main` 以外は拒否。Environment `prod` の承認あり | 手動のみ |
@@ -129,12 +130,13 @@ infra/terraform/
 | --- | --- |
 | `WORKLOAD_IDENTITY_PROVIDER` | 出力 `workload_identity_provider` |
 | `DEPLOYER_SERVICE_ACCOUNT` | 出力 `deployer_service_account` |
+| `RUNTIME_SERVICE_ACCOUNT` | 出力 `runtime_service_account`(**dev のみ**。インテグレーションテストが借りるサービスアカウント) |
 | `ARTIFACT_REGISTRY_REPOSITORY_URL` | 出力 `artifact_registry_repository_url` |
 | `CLOUD_RUN_JOB_NAME` | 出力 `cloud_run_job_scan` |
 | `GCP_PROJECT_ID` | その環境の GCP プロジェクト ID(Terraform の `project_id`) |
 | `REGION` | `asia-northeast1` など(未設定なら `asia-northeast1`) |
 | `LINE_CHANNEL_ID` | その環境で使う LINE チャネルの ID(Terraform の `line_channel_id`) |
-| `SPREADSHEET_ID` | その環境の工程表のスプレッドシート ID(Terraform の `spreadsheet_id`、dev ではインテグレーションテストにも使う) |
+| `SPREADSHEET_ID` | その環境の工程表のスプレッドシート ID(Terraform の `spreadsheet_id`。dev ではインテグレーションテストも読む) |
 | `NOTIFY_LEAD_MINUTES` | 開始の何分前から通知するか(1〜1440)。任意で、未設定なら `10`(Terraform の `notify_lead_minutes` → Job の環境変数 `NOTIFY_LEAD_MINUTES`) |
 | `SCHEDULER_PAUSED` | Scheduler を一時停止するか。未設定なら `true`。最初のデプロイ後に `false` にする |
 | `APP_ENV` | インテグレーションテスト用(dev のみ) |
