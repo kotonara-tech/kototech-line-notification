@@ -115,6 +115,8 @@ flowchart LR
 | 手動(任意のブランチ) | `deploy-to-dev` | dev |
 | `main` へ push | `deploy-to-prod`(QA → インフラ → アプリ) | prod(承認あり) |
 | 手動(`main` のみ) | `deploy-to-prod` | prod(承認あり) |
+| 手動(任意のブランチ) | `apply-to-dev`(インフラだけ。plan のみも可) | dev |
+| 手動(`main` のみ) | `apply-to-prod`(インフラだけ。plan のみも可) | prod(承認あり) |
 
 - prod は Workload Identity の条件でも、`refs/heads/main` 以外からの認証を拒否する
 - ワークフローの詳細は [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」を参照

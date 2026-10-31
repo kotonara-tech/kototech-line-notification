@@ -125,4 +125,4 @@ infra/terraform/
 - [ ] dev と prod の差(削除保護、ref 制限など)を意識したか
 - [ ] CI の SA(`github-deployer`)で `plan` / `apply` できる権限があるか(足りなければ `terraform_roles`)
 - [ ] 出力が必要な値(GitHub の Environment variables に入れるもの)を出力したか
-- [ ] `docs/engineering/02-infra.md` と構成図(`docs/infra/architecture.png`)を更新したか
+- [ ] `docs/engineering/02-infra.md` と構成図(`docs/infra/architecture.png`。`docs/infra/generate_architecture.py` を直して再生成し、目で確認する)を更新したか

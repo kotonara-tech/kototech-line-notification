@@ -118,6 +118,8 @@ infra/terraform/
 | `reusable-deploy-backend.yml` | イメージのビルド → Artifact Registry へ push → Cloud Run Job のイメージ更新 | 他から呼び出し |
 | `deploy-to-dev.yml` | QA(インテグレーションテスト含む)→ インフラ(Terraform)→ アプリのデプロイ | `develop` への push、手動(任意のブランチ) |
 | `deploy-to-prod.yml` | QA → インフラ(Terraform)→ アプリのデプロイ | `main` への push、手動。`main` 以外は拒否 |
+| `apply-to-dev.yml` | **インフラ(Terraform)だけ**を適用する。QA とアプリのデプロイはしない。`apply` を false にすると plan だけ | 手動のみ(任意のブランチ) |
+| `apply-to-prod.yml` | 同上(prod)。`main` 以外は拒否。Environment `prod` の承認あり | 手動のみ |
 
 - ブランチ運用は [../operations/01-operations.md](../operations/01-operations.md) を参照
 - 認証は Workload Identity Federation(鍵なし)。prod は、Provider の条件でも `refs/heads/main` 以外を拒否する
