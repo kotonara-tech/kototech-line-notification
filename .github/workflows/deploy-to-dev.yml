@@ -12,8 +12,15 @@ permissions:
 # - Job 本体(Terraform 管理)が存在する状態でイメージを更新するため、インフラを先に適用する
 # - インテグレーションテストが使う権限(実行用サービスアカウントを借りる権限)は、インフラが作るため、
 #   インフラの適用のあとに実行する
+#
+# スキップ: develop への push のうち、コミットメッセージに [skip deploy-dev] を含むものは、dev へ配備しない
+# - develop はスカッシュのみなので、コミットメッセージは PR のタイトルと本文になる(マーカーは PR のタイトルに書く)
+# - 内容が変わらない反映(リリース後の main → develop など)にだけ付ける。使い方は docs/operations/01-operations.md
+# - 判定は最初のジョブ(qa)だけ。後続は needs でつながっているため、qa がスキップされると連鎖してスキップされる
+# - push のときだけ判定する。workflow_dispatch(手動)は、マーカーに関係なく、常に実行される
 jobs:
   qa:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip deploy-dev]')
     uses: ./.github/workflows/reusable-qa.yml
 
   infra:

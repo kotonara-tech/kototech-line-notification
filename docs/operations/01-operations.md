@@ -78,6 +78,10 @@ flowchart LR
 6. デプロイ後、prod の動作を確認する
 7. `main` のマージコミットにバージョンタグを付け、リリースノートを書く(下記「リリースとバージョニング」)
 
+- リリース PR のマージ(`main` への push)で起動するのは `deploy-to-prod` だけで、**`deploy-to-dev` は起動しない**(`develop` が変わらないため)
+- マージ直後の `main` と `develop` は、内容が同じ(`main` に増えるのは、マージコミットだけ)。そのため、**リリースのあとに `main` を `develop` へ反映する必要はない**
+- 反映するなら、PR のタイトルに `[skip deploy-dev]` を付ける(内容が変わらないのに dev を配備し直さないため。使い方は「デプロイとの対応」)
+
 ## リリースとバージョニング
 
 - `main` のコミットに**タグ**を付け、**リリースノート**を書く
@@ -92,6 +96,10 @@ flowchart LR
 1. `main` から `hotfix/*` を切って修正する
 2. `main` へ PR を作り、`ci` と承認を経てマージする → prod へデプロイされる
 3. 同じ修正を `develop` へバックマージする(`main` → `develop` の PR)
+
+- バックマージのスカッシュマージは、`develop` への push になるため、`deploy-to-dev` が起動する
+- 修正が `develop` に入る(内容が変わる)ので、**起動してよい**。`[skip deploy-dev]` は付けない(付けると、dev が `develop` とずれる)
+- `develop` が、すでに同じ修正を持っていて、内容が変わらないときだけ、PR のタイトルに `[skip deploy-dev]` を付ける
 
 ## ブランチ保護(Ruleset)
 
@@ -128,7 +136,7 @@ GitHub の Settings → Rules → Rulesets で設定している。リポジト�
 | 契機 | ワークフロー | 環境 |
 | --- | --- | --- |
 | PR(任意のブランチ) | `ci` | なし(QA のみ) |
-| `develop` へ push | `deploy-to-dev`(QA → インフラ → アプリ) | dev |
+| `develop` へ push(`[skip deploy-dev]` を含むものを除く) | `deploy-to-dev`(QA → インフラ → アプリ) | dev |
 | 手動(任意のブランチ) | `deploy-to-dev` | dev |
 | `main` へ push | `deploy-to-prod`(QA → インフラ → アプリ) | prod(承認あり) |
 | 手動(`main` のみ) | `deploy-to-prod` | prod(承認あり) |
@@ -136,7 +144,18 @@ GitHub の Settings → Rules → Rulesets で設定している。リポジト�
 | 手動(`main` のみ) | `apply-to-prod`(インフラだけ。plan のみも可) | prod(承認あり) |
 
 - prod は Workload Identity の条件でも、`refs/heads/main` 以外からの認証を拒否する
+- `deploy-to-dev` が起動するのは、`develop` への push(= `develop` 宛て PR のスカッシュマージ)と、手動のときだけ。PR の作成、`main` への push(リリース PR のマージ)では起動しない
 - ワークフローの詳細は [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」を参照
+
+### `deploy-to-dev` を起動しない: `[skip deploy-dev]`
+
+- `develop` への push のうち、コミットメッセージに `[skip deploy-dev]` を含むものは、`deploy-to-dev` が実行されない(QA がスキップされ、後続のインフラ・インテグレーションテスト・デプロイも連鎖してスキップされる)
+- `develop` はスカッシュのみで、コミットメッセージは PR のタイトルと本文になる。マーカーは、**PR のタイトルに書く**(例: `【CORE】main を develop に反映する [skip deploy-dev]`)
+- **付ける**: `develop` の内容が変わらない反映(リリース後の `main` → `develop` など)。dev に配備済みの内容と同じで、配備し直す意味がないとき
+- **付けない**: 通常の変更、hotfix のバックマージ(内容が変わるため、dev に配備して `develop` と揃える)
+- 手動実行(`workflow_dispatch`)は、マーカーの影響を受けない。間違えてスキップしたときは、`develop` を指定して手動で実行する
+- マーカーを説明する文章を PR の本文にそのまま書くと、その PR のマージも対象になる。説明は、ドキュメント(このファイルなど)に書く
+- GitHub 標準の `[skip ci]` は使わない: `push` と `pull_request` の**すべてのワークフロー**が対象で、PR で使うとチェック(`ci`)も `Pending` のまま残り、必須チェックにしたときにマージを止める
 
 ## インフラ(Terraform)の変更
 
