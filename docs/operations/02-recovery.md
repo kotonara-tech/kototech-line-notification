@@ -28,7 +28,7 @@ Terraform が、リソースを意図せず削除・作り直ししたときの�
   - 実行の種類。ジョブ名が `terraform (plan)` なら plan のみ、`terraform (plan / apply)` なら apply まで進む
   - 起動した人に、`allow_destroy` を `true` にしていないかを聞く(削除を許す指定)
   - `gh variable list --env prod` で、`GCP_PROJECT_ID` などの値の先頭・末尾に、空白がないか
-- 迷ったときは承認せず、`apply-to-prod` を `apply` が false で起動する。plan のみの実行は、`apply` しない。ステップサマリの「削除を含む変更」を読んでから、本番の実行に進む
+- 迷ったときは、その実行を承認せず、キャンセルする。次に、`apply-to-prod` を `apply` が false で起動する。**この plan のみの実行も、Environment `prod` の承認を求められる**ため、承認する(`apply` しないので安全)。ステップサマリの「削除を含む変更」を読んでから、本番の実行に進む
 
 ## 手順
 
