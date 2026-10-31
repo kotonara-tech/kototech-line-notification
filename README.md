@@ -9,6 +9,7 @@
 | `docs/` | 設計ドキュメントと、Flex Message のモック(今後追加) |
 | `backend/` | バックエンドのコード (Go, Cloud Run Job) |
 | `infra/` | Terraform(`bootstrap` / `env/{dev,prod}` / `modules`) |
+| `scripts/` | ドキュメントと yml の検査(`make verify` から呼ばれる) |
 | `.claude/` | 開発用のスキル等 AI 向け設定 |
 | `CLAUDE.md` | AI (Claude Code) 向けのプロジェクト設定 |
 
