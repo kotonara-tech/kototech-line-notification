@@ -41,7 +41,7 @@ Cloud Run は **Job** として使う。HTTP エンドポイントを持たず�
 ```mermaid
 flowchart LR
     Sched[Cloud Scheduler<br/>毎分] -->|Jobs API :run| Run[Cloud Run Job<br/>Go]
-    Run -->|トークン取得| SM[Secret Manager]
+    Run -->|シークレット取得| SM[Secret Manager]
     Run -->|工程表の読み書き| Sheet[(スプレッドシート)]
     Run -->|Messaging API| LINE[LINE]
 ```
@@ -57,7 +57,7 @@ flowchart LR
 | Scheduler → Cloud Run Job | Scheduler 用サービスアカウントに、その Job への `roles/run.invoker` を付与し、Jobs API を OAuth で呼ぶ。公開エンドポイントは存在しない |
 | Cloud Run → Sheets API | Cloud Run 実行用サービスアカウントで認証(鍵ファイルは使わない) |
 | スプレッドシートの権限 | 上記実行用サービスアカウントのメールアドレスをスプレッドシートに共有する(通常は閲覧+通知済み記録のため編集者) |
-| LINE のトークン | Secret Manager に保管し、Cloud Run Job 実行用サービスアカウントにだけ参照権限を付ける |
+| LINE のチャネルシークレット | Secret Manager に保管し、Cloud Run Job 実行用サービスアカウントにだけ参照権限を付ける(アクセストークンは保管せず、アプリが発行する) |
 
 - サービスアカウントは用途ごとに分ける(Scheduler 用 / Job 実行用)。最小権限とする
 - 工程表を編集できる人は、スプレッドシートの共有設定で管理する(Google の権限階層をそのまま利用)
@@ -68,7 +68,7 @@ flowchart LR
 
 | 項目 | 内容 |
 | --- | --- |
-| 機能 | 工程表を読み、**現在時刻から n 分以内に始まるプログラム**を検出し、「まもなく開始します」旨の**固定文**を LINE の **broadcast(全友だちへ一斉配信)**で送信する |
+| 機能 | 工程表を読み、**現在時刻から n 分以内に始まるプログラム**を検出し、「まもなく開始します」旨の通知を、LINE の **broadcast(全友だちへ一斉配信)**で送信する。文面のテンプレートは固定で、イベント名・プログラム名・開始時刻・場所を差し込む |
 | 起動 | Cloud Scheduler が毎分、Cloud Run Job を起動する(エンドポイントなし) |
 | バイナリ | ビルドする Go バイナリは 1 つ。環境変数 `ROLE`(`scan` / 将来 `api`)で役割を切り替える。将来の API 追加にも同じコードベースで対応する |
 | 判定 | 「ちょうど n 分前」ではなく「開始まで n 分以内で、未通知」で判定する。起動のずれや 1 回の取りこぼしを次回で吸収する |
@@ -78,12 +78,13 @@ flowchart LR
 
 - Flex Message による通知(見た目は `docs/mocks/` で設計)
 - LINE Webhook の受信(返信などの双方向機能)。broadcast ではユーザー ID の収集が不要なため、MVP では不要。受ける場合は別の受け口(HTTP サービス)を追加する前提で検討する
-- 通知内容の差し込み(プログラム名・場所など)
+- 文面の見た目の改善(Flex Message 化)。`docs/mocks/` で設計してから行う
 
 ## 関連ドキュメント
 
 - [02-infra.md](02-infra.md) インフラ(Terraform・環境・認証・CD)
 - [03-backend.md](03-backend.md) バックエンド(Go)の設計
+- [04-timetable-sheet.md](04-timetable-sheet.md) 工程表(スプレッドシート)の形式
 
 ## スコープ外(現時点)
 

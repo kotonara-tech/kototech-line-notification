@@ -33,7 +33,7 @@ backend/
     └── interfaces/{job,api}    # 入口のアダプタ
 ```
 
-- `domain` は他の層を import しない。違反は `depguard` で検出する(`.golangci.yml` に設定する。未作成)
+- `domain` は他の層を import しない。違反は `depguard` で検出する(`backend/.golangci.yml` に設定済み。domain と application の依存方向を検査する)
 - インターフェースは**使う側**で定義する。リポジトリは `domain`、外部サービスのポートは `application/port`
 - インターフェースは小さく保つ(メソッド 1〜3 個)。実装を 1 つしか持たない大きなインターフェースを先回りして作らない
 - 具体実装の選択と注入は `bootstrap` に集める。ユースケースやドメインの中で `New...` して外部クライアントを作らない
@@ -149,7 +149,7 @@ backend/
 ## 依存ライブラリ
 
 - 標準ライブラリで足りるなら足す。依存が増えるほど、更新と脆弱性対応のコストが増える
-- 追加するときは理由を PR に書く。候補: Sheets は `google.golang.org/api/sheets/v4`、LINE は公式 SDK か標準 `net/http`(未決: Q12)
+- 追加するときは理由を PR に書く。Sheets は `google.golang.org/api/sheets/v4`、LINE は標準 `net/http`(D30)
 - 認証は Application Default Credentials に任せ、鍵ファイルを扱うコードを書かない
 
 ## レビューの観点(自己チェック)

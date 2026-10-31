@@ -19,7 +19,7 @@ GCP プロジェクトは **ops / dev / prod の 3 つ**に分ける(プロジ�
 - dev と prod は、リソース名・Workload Identity Pool が衝突しないよう、環境ごとにプロジェクトを分ける
 - ops を分けるのは、dev / prod のどちらを消しても state が失われないようにするため
 - VPC は使わない(すべてマネージドサービスの API 呼び出し)。プロジェクトの分割はネットワークの分離ではなく、リソース・IAM・クォータ・課金の分離
-- スプレッドシート ID、LINE トークンは環境ごとに別のものを使う
+- スプレッドシート ID、LINE チャネル(チャネル ID・チャネルシークレット)は環境ごとに別のものを使う
 
 ## ディレクトリ構成
 
@@ -55,6 +55,7 @@ infra/terraform/
 4. 出力された値(`workload_identity_provider`、`deployer_service_account`、`artifact_registry_repository_url`)を GitHub Actions に設定
 5. LINE のチャネルシークレット(`line-channel-secret`)の**本物の値**を、環境ごとに別の version として登録する。アクセストークンは保管せず、アプリが `LINE_CHANNEL_ID`(Terraform の変数 `line_channel_id`)とシークレットから、実行のたびにステートレスなトークンを発行する。Terraform は Secret の入れ物と仮の version(`CHANGE_ME`)だけを作る(version が 0 件だと Cloud Run Job を作成できないため)。値は state に残さないよう Terraform 外から登録する(`printf %s "<値>" | gcloud secrets versions add line-channel-secret --data-file=- --project=<プロジェクト ID>`)。Cloud Run が環境変数として注入するため、アプリは Secret Manager の API を呼ばない
 6. 出力された `runtime_service_account` のメールを、工程表スプレッドシートの共有先(編集者)に追加
+   - **dev のみ**: インテグレーションテスト(`deploy-to-dev` の QA で実行する、読み取りだけのテスト)のため、デプロイ用サービスアカウント(`github-deployer@<プロジェクト ID>.iam.gserviceaccount.com`)にも、**閲覧者**として共有する(D31)
 7. 最初のデプロイ後、Environment の variable `SCHEDULER_PAUSED` を `false` にして、`deploy-to-*` を再実行する(Scheduler を有効化)
 8. prod も同様に実施
 9. GitHub Actions から Terraform を実行するため、dev / prod のデプロイ用サービスアカウント(`github-deployer@<プロジェクト ID>.iam.gserviceaccount.com`)を `bootstrap/` の `state_admins` に追加して再適用する(state バケットへの読み書き権限)
@@ -132,6 +133,7 @@ infra/terraform/
 | `REGION` | `asia-northeast1` など(未設定なら `asia-northeast1`) |
 | `LINE_CHANNEL_ID` | その環境で使う LINE チャネルの ID(Terraform の `line_channel_id`) |
 | `SPREADSHEET_ID` | その環境の工程表のスプレッドシート ID(Terraform の `spreadsheet_id`、dev ではインテグレーションテストにも使う) |
+| `NOTIFY_LEAD_MINUTES` | 開始の何分前から通知するか(1〜1440)。任意で、未設定なら `10`(Terraform の `notify_lead_minutes` → Job の環境変数 `NOTIFY_LEAD_MINUTES`) |
 | `SCHEDULER_PAUSED` | Scheduler を一時停止するか。未設定なら `true`。最初のデプロイ後に `false` にする |
 | `APP_ENV` | インテグレーションテスト用(dev のみ) |
 
@@ -142,7 +144,6 @@ infra/terraform/
 - `deploy-to-*` の順序は **QA → インフラ → アプリのデプロイ**。Cloud Run Job や Artifact Registry を Terraform が先に作ってから、イメージを更新する
 - Environment `prod` の承認は、ジョブごとに求められるため、prod では「インフラ」と「アプリのデプロイ」で 2 回承認する。承認前に `plan` を確認する形に分けたい場合は、承認を挟まない plan 専用の Environment を別に用意する方法がある(未実施)
 - PR 上での `plan` は未実装(`ci.yml` には含めていない)。`reusable-infra-deploy.yml` の `apply: false` で追加できる
-- 前提: `backend/Dockerfile`、`go.mod`、`cmd/notifier` はまだない
 
 ## デプロイ用サービスアカウントの権限
 

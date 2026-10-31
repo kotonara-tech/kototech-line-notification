@@ -11,7 +11,7 @@ MVP は「起動して処理し、終了する」Cloud Run Job として動か�
 - ビルドする Go バイナリ(コンテナイメージ)は **1 つだけ**(D13)
 - 起動時の環境変数 `ROLE` でやることを切り替える。役割ごとにバイナリやイメージを分けない
 - ビジネスルール(いつ・何を通知するか)は **ドメイン層に閉じ込め**、Sheets / LINE などの外部サービスの事情をドメインに持ち込まない
-- 工程表のカラム構成(Q3)や通知済みの記録方法(Q2)が未確定でも、ドメインとユースケースは先に固められる設計にする(差異は infrastructure 層で吸収する)
+- 工程表の列の形式は [04-timetable-sheet.md](04-timetable-sheet.md) を正本とし、読み取りは infrastructure 層に閉じ込める(形式が変わってもドメインとユースケースは変えない)
 
 ## 責務(MVP)
 
@@ -29,8 +29,10 @@ MVP は「起動して処理し、終了する」Cloud Run Job として動か�
 | 環境変数 | 内容 | 必須 | 由来 |
 | --- | --- | --- | --- |
 | `ROLE` | **このプロセスの役割**。`scan`(MVP)/ `api`(将来) | 常に必須 | Terraform(平文) |
-| `APP_ENV` | `dev` / `prod` | 常に必須 | Terraform(平文) |
+| `APP_ENV` | `dev` / `prod`(ローカル実行は `local`) | 常に必須 | Terraform(平文) |
 | `SPREADSHEET_ID` | 工程表のスプレッドシート ID | `ROLE=scan` のとき必須 | Terraform(平文) |
+| `SHEET_NAME` | 工程表のシート名 | 任意(既定 `工程表`) | - |
+| `NOTIFY_LEAD_MINUTES` | 開始の何分前から通知するか(1〜1440) | 任意(既定 10) | Terraform(平文) |
 | `LINE_CHANNEL_ID` | LINE チャネル ID(ステートレスなアクセストークンの発行に使う。秘匿情報ではない) | LINE へ送信する ROLE で必須 | Terraform(平文) |
 | `LINE_CHANNEL_SECRET` | LINE チャネルシークレット(アクセストークンの発行と、Webhook の署名検証に使う) | LINE へ送信する ROLE で必須 | Secret Manager |
 | `PORT` | 待ち受けポート | `ROLE=api` のとき | Cloud Run が設定 |
@@ -118,7 +120,7 @@ flowchart BT
 | `config` | 環境変数の読み込みと検証 | 標準ライブラリのみ |
 
 - **依存は内側(domain)に向かう一方向**。`domain` は他の層を import しない
-- 依存方向の違反は、`golangci-lint` の `depguard` で検出できるようにする(設定は実装時に追加)
+- 依存方向の違反は、`golangci-lint` の `depguard` で検出する(`backend/.golangci.yml` に設定済み)。`domain` は標準ライブラリと自分自身だけ、`application` は標準ライブラリと `domain` と自分自身だけを許可する許可リスト方式で、外部ライブラリや外側の層は、列挙しなくてもすべて拒否される
 - 境界づけられたコンテキストは MVP では 1 つ(通知)。CQRS・イベントソーシングなどは導入しない(必要になるまで足さない)
 
 ### ユビキタス言語
@@ -140,11 +142,13 @@ flowchart BT
 type ID string
 
 type Program struct {
-    id         ID
-    name       string
-    location   string
-    startAt    time.Time
-    notifiedAt *time.Time
+    id            ID
+    eventName     string
+    name          string
+    location      string
+    startAt       time.Time
+    notifyEnabled bool
+    notifiedAt    *time.Time
 }
 
 // 通知対象か。開始まで leadTime 以内で、開始前で、未通知。
@@ -161,8 +165,8 @@ type Repository interface {
 ```
 
 - 「開始まで n 分以内かつ未通知」「開始済みは対象外」(D6)は `IsDueForNotice` に置く。**時刻は引数で受け取り、`time.Now()` を直接呼ばない**
-- `domain/notice` は、プログラムから通知内容を作る値オブジェクト(MVP は固定文。差し込み・Flex Message 化は Q5 で決まったときに拡張)
-- 実際のフィールドは、工程表のカラム構成(Q3)の確定後に決める
+- `domain/notice` は、プログラムから通知内容を作る値オブジェクト(MVP は固定文。Flex Message 化は `docs/mocks/` で設計してから拡張)
+- フィールドは、工程表の列([04-timetable-sheet.md](04-timetable-sheet.md))に対応する: イベント名・プログラム名・場所・開始日時・通知するか・通知済みの日時
 
 ### アプリケーション層
 
@@ -208,7 +212,7 @@ flowchart TD
 - **1 件の失敗で全体を止めない**。他のプログラムの通知は続行し、最後に失敗があればエラーを返す(終了コード 1)
 - **冪等にする**: 通知済みの記録を信頼の源とし、同じプログラムへ二重送信しない。Job の実行が重なる場合の排他は Q11 で決める
 - **読み取りは 1 回にまとめる**: `ListAll` で工程表全体を 1 回で読む(Sheets API の割り当て節約)
-- 送信と記録の順序は「送信 → 記録」。記録に失敗すると次回に再送される可能性がある。扱いは Q2 で詰める
+- 送信と記録の順序は「送信 → 記録」。記録に失敗しても、次回の実行で同じ Retry Key(プログラム ID から決まる UUID)で送るため、LINE 側で重複として扱われ(409)、二重配信にはならない。409 は成功として扱い、通知済みを記録し直す
 - 1 回の実行は短時間で終わらせる(Job のタイムアウトは 300 秒、再試行なし)
 
 ### インフラストラクチャ層
@@ -216,11 +220,11 @@ flowchart TD
 | パッケージ | 実装するもの | 使うもの | 認証 |
 | --- | --- | --- | --- |
 | `infrastructure/sheets` | `program.Repository` | `google.golang.org/api/sheets/v4` | Application Default Credentials(実行用サービスアカウント) |
-| `infrastructure/line` | `port.Notifier`(LINE の **broadcast** で全友だちへ送る)と、トークン自動発行の認証トランスポート | 標準 `net/http`(`POST /v2/bot/message/broadcast`、`POST /oauth2/v3/token`)。公式 SDK は、トークンの扱いを差し込めるか確認して決める(Q12) | `LINE_CHANNEL_ID` + `LINE_CHANNEL_SECRET`(ステートレスなトークンを発行) |
+| `infrastructure/line` | `port.Notifier`(LINE の **broadcast** で全友だちへ送る)と、トークン自動発行の認証トランスポート | 標準 `net/http`(`POST /v2/bot/message/broadcast`、`POST /oauth2/v3/token`。公式 SDK は使わない: D30) | `LINE_CHANNEL_ID` + `LINE_CHANNEL_SECRET`(ステートレスなトークンを発行) |
 | `infrastructure/clock` | `port.Clock` | 標準ライブラリ | - |
 
 - **送信は broadcast のみ**。送信先(ユーザー ID・グループ ID)をドメインに持たない。`Notifier` は「通知内容」だけを受け取る
-- **二重送信の防止にリトライキーを使う**: LINE の broadcast には、同じ `X-Line-Retry-Key`(UUID)のリクエストを重複して配信しない仕組みがある。`notice.Notice` に、プログラム ID と通知の種類から決まる安定したキー(UUID v5 など)を持たせ、送信時に付与する。通知済みの記録(工程表)に加えた、二重の防止策になる(有効期間などの仕様は公式を確認する。Q2、Q11)
+- **二重送信の防止にリトライキーを使う**: LINE の broadcast には、同じ `X-Line-Retry-Key`(UUID)のリクエストを重複して配信しない仕組みがある。`notice.Notice` に、プログラム ID と通知の種類から決まる安定したキー(UUID v5 など)を持たせ、送信時に付与する。通知済みの記録(工程表)に加えた、二重の防止策になる(有効期間などの仕様は公式を確認する。Q11)
 - **工程表のカラム構成との対応(行 ⇔ `Program`)は `infrastructure/sheets` に閉じ込める**(防腐層)。シートのレイアウトが変わっても、ドメインは変わらない
 - 時刻は JST(`Asia/Tokyo`)で解釈する。コンテナにタイムゾーンデータがなくても動くよう、`time/tzdata` を import して埋め込む
 - ローカル開発では、`gcloud auth application-default login` またはサービスアカウントの偽装を使う(鍵ファイルは作らない)
@@ -291,10 +295,10 @@ backend/
 
 ## ログ・エラー
 
-- 構造化ログ(JSON、`log/slog`)を標準出力へ。Cloud Logging に集約される
+- 構造化ログ(JSON、`log/slog`)を標準出力へ。Cloud Logging に集約される。slog の既定のキー(`level` / `msg`)は Cloud Logging に認識されないため、`severity`(`ERROR` / `WARNING` / `INFO` / `DEBUG`)と `message` に置き換えて出力する(エラーだけを絞り込めるようにするため)
 - すべてのログに `role`、`app_env` を付ける
 - 失敗は非 0 終了で Job の失敗として記録される。アラート方法は未決(Q7、Q17)
 
 ## 未決
 
-[00-openquestion.md](00-openquestion.md) の Q1〜Q3、Q5〜Q7、Q10〜Q12 に依存する。特に工程表のカラム構成(Q3)と通知済みの記録方法(Q2)が決まるまで、`Program` のフィールドと `infrastructure/sheets` の詳細は書けない。
+[00-openquestion.md](00-openquestion.md) の Q6〜Q9、Q11、Q14、Q17、Q19 に依存する。

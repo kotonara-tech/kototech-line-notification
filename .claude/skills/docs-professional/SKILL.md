@@ -27,7 +27,9 @@ docs/
 │   ├── 00-openquestion.md    # 未決事項と決定の記録
 │   ├── 01-overview.md        # 概要
 │   ├── 02-infra.md           # インフラ
-│   └── 03-backend.md         # バックエンド
+│   ├── 03-backend.md         # バックエンド
+│   ├── 04-timetable-sheet.md # 工程表(スプレッドシート)の形式
+│   └── 04-timetable-sample.csv # 工程表のサンプル
 ├── operations/               # 運用ルール(GitHub の利用フローなど)
 ├── infra/                    # インフラ構成図(architecture.png)
 └── mocks/                    # Flex Message などの HTML モック(全シナリオ)
