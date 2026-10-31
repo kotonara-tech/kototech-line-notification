@@ -1,11 +1,15 @@
 name: check-vars
-description: GitHub の変数の値の前後に、空白(スペース・タブ・改行)がないかを検査する。あれば、変数名だけを示して失敗する(値は出さない)
+description: GitHub の変数の値の前後に、空白(スペース・タブ・改行など)や目に見えない文字(ゼロ幅スペース・BOM)がないかを検査する。あれば、変数名だけを示して失敗する(検査の出力に値は含めない。ただし、値の受け渡しで、Actions のログに値が表示される)
 
 # 背景: prod の GCP_PROJECT_ID の先頭に空白が入り、Terraform が別のプロジェクトと見なして、破壊的な計画を作った。
 # 呼び出し側は、actions/checkout の直後に呼ぶ(ローカル action は、リポジトリの取得後でないと見つからない)。
 #   - uses: ./.github/actions/check-vars
 #     with:
 #       vars-json: ${{ toJSON(vars) }}
+#
+# ログに出るもの: この検査が出力するのは、変数名と場所だけ。ただし、Actions は、ステップの with: と env: の値を、
+# 実行ログに表示する。vars-json(全変数の値)は、呼び出し側の with: と、下の env: で渡すため、ログに表示される。
+# このリポジトリは公開のため、ログも公開される。GitHub の変数(vars)には、秘匿情報を入れない(秘匿情報は Secret Manager)。
 
 inputs:
   vars-json:
@@ -15,10 +19,11 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: 変数の値の前後に空白がないことを確認する
+    - name: 変数の値の前後に空白(と目に見えない文字)がないことを確認する
       shell: bash
       env:
-        # 式の値は、シェルのコマンドに直接埋め込まず、環境変数で渡す(インジェクションを避ける)
+        # 式の値は、シェルのコマンドに直接埋め込まず、環境変数で渡す(インジェクションを避ける)。
+        # ステップの env: はログに表示されるため、全変数の値がログに出る(上の「ログに出るもの」)
         VARS_JSON: ${{ inputs.vars-json }}
       run: |
         set -euo pipefail
@@ -35,21 +40,22 @@ runs:
         fi
 
         # 値の先頭・末尾の空白を探す。出力するのは、変数名と、場所(先頭・末尾)だけ
-        # \A と \z は、文字列全体の端(^ と $ は、行の端にも一致するため使わない)。\s は、スペース・タブ・改行・全角スペースなど
+        # \A と \z は、文字列全体の端(^ と $ は、行の端にも一致するため使わない)。\s は、スペース・タブ・改行・全角スペースなど。
+        # \s に一致しない、目に見えない文字(ゼロ幅スペース U+200B と BOM U+FEFF。Web ページなどからのコピーで混ざる)も加える
         bad=$(printf '%s' "$VARS_JSON" | jq -r '
           to_entries[]
           | select(.value | type == "string")
-          | (.value | test("\\A\\s")) as $head
-          | (.value | test("\\s\\z")) as $tail
+          | (.value | test("\\A[\\s\\x{200b}\\x{feff}]")) as $head
+          | (.value | test("[\\s\\x{200b}\\x{feff}]\\z")) as $tail
           | select($head or $tail)
           | "\(.key)\t\(if $head and $tail then "先頭と末尾" elif $head then "先頭" else "末尾" end)"
         ')
 
         if [ -n "$bad" ]; then
           while IFS=$'\t' read -r name where; do
-            echo "::error title=変数の値に空白がある::${name} の値の${where}に空白(スペース・タブ・改行)がある。GitHub の Variables を直す"
+            echo "::error title=変数の値に空白がある::${name} の値の${where}に空白(スペース・タブ・改行など)か、目に見えない文字(ゼロ幅スペース・BOM)がある。GitHub の Variables を直す"
           done <<< "$bad"
           exit 1
         fi
 
-        echo "${count} 個の変数を検査した。値の前後に空白はない"
+        echo "${count} 個の変数を検査した。値の前後に空白や目に見えない文字はない"
