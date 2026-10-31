@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kotonara-tech/kototech-line-notification/backend/internal/domain/notice"
+	"github.com/kotonara-tech/kototech-line-notification/backend/internal/domain/program"
 	"github.com/kotonara-tech/kototech-line-notification/backend/internal/infrastructure/line"
 )
 
@@ -119,7 +120,19 @@ func newNotifier(srv *httptest.Server, now func() time.Time) *line.Notifier {
 	})
 }
 
-var sampleNotice = notice.Notice{Key: "11111111-2222-5333-8444-555555555555", Text: "まもなく開始します"}
+// 送信される本文(template パッケージが、通知から作る)
+const sampleText = "【テスト】\nまもなく開始します\n基調講演\n開始時刻: 15:30\n場所: ホール"
+
+var sampleNotice = func() notice.Notice {
+	p, err := program.New(program.Params{
+		ID: "sample", EventName: "テスト", Name: "基調講演", Location: "ホール",
+		StartAt: time.Date(2026, 11, 3, 15, 30, 0, 0, time.FixedZone("JST", 9*60*60)), NotifyEnabled: true,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return notice.NewStartingSoon(p)
+}()
 
 func TestNotify_SendsBroadcastWithTokenAndRetryKey(t *testing.T) {
 	f, srv := newFakeLINE(t)
@@ -138,7 +151,7 @@ func TestNotify_SendsBroadcastWithTokenAndRetryKey(t *testing.T) {
 	if got.RetryKey != sampleNotice.Key {
 		t.Errorf("X-Line-Retry-Key = %q", got.RetryKey)
 	}
-	if len(got.Texts) != 1 || got.Texts[0] != sampleNotice.Text {
+	if len(got.Texts) != 1 || got.Texts[0] != sampleText {
 		t.Errorf("本文 = %v", got.Texts)
 	}
 }
@@ -186,7 +199,7 @@ func TestNotify_RefreshesTokenOnUnauthorized(t *testing.T) {
 		t.Errorf("再発行は 1 回のはず: %d", f.issued)
 	}
 	last := f.broadcasts[len(f.broadcasts)-1]
-	if last.Authorization != "Bearer token-2" || last.Texts[0] != sampleNotice.Text {
+	if last.Authorization != "Bearer token-2" || last.Texts[0] != sampleText {
 		t.Errorf("再試行のリクエストが不正(ボディが再送されていない可能性): %+v", last)
 	}
 }

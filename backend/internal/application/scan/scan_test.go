@@ -3,7 +3,6 @@ package scan_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -39,14 +38,12 @@ func (r *fakeRepo) Save(_ context.Context, p *program.Program) error {
 
 type fakeNotifier struct {
 	sent []notice.Notice
-	fail map[string]error // 本文に含まれる文字列 → エラー
+	fail map[string]error // プログラム名 → エラー
 }
 
 func (n *fakeNotifier) Notify(_ context.Context, msg notice.Notice) error {
-	for text, err := range n.fail {
-		if strings.Contains(msg.Text, text) {
-			return err
-		}
+	if err := n.fail[msg.Program.Name()]; err != nil {
+		return err
 	}
 	n.sent = append(n.sent, msg)
 	return nil
@@ -86,7 +83,7 @@ func TestExecute_NotifiesDueProgramsAndSaves(t *testing.T) {
 	if err := newUseCase(repo, n).Execute(context.Background()); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(n.sent) != 1 || !strings.Contains(n.sent[0].Text, "対象") {
+	if len(n.sent) != 1 || n.sent[0].Program.Name() != "対象" {
 		t.Fatalf("通知されたのは「対象」だけのはず: %+v", n.sent)
 	}
 	if len(repo.saved) != 1 || repo.saved[0] != due.ID() {
@@ -125,7 +122,7 @@ func TestExecute_OneFailureDoesNotStopOthers(t *testing.T) {
 	if !errors.Is(err, sendErr) {
 		t.Fatalf("送信の失敗が返るはず: %v", err)
 	}
-	if len(n.sent) != 1 || !strings.Contains(n.sent[0].Text, "成功する") {
+	if len(n.sent) != 1 || n.sent[0].Program.Name() != "成功する" {
 		t.Errorf("成功する方は通知されるはず: %+v", n.sent)
 	}
 	if bad.IsNotified() {

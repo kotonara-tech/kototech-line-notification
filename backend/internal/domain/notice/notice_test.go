@@ -28,38 +28,19 @@ func mustProgram(t *testing.T, p program.Params) *program.Program {
 	return got
 }
 
-func TestStartingSoon_Text(t *testing.T) {
-	start := time.Date(2026, 11, 3, 15, 30, 0, 0, jst)
-	tests := []struct {
-		name   string
-		params program.Params
-		want   string
-	}{
-		{
-			name:   "すべての項目あり",
-			params: program.Params{EventName: "ことならテック Meetup", Name: "基調講演", Location: "メインホール", StartAt: start},
-			want:   "【ことならテック Meetup】\nまもなく開始します\n基調講演\n開始時刻: 15:30\n場所: メインホール",
-		},
-		{
-			name:   "イベント名と場所なし",
-			params: program.Params{Name: "休憩明けセッション", StartAt: start},
-			want:   "まもなく開始します\n休憩明けセッション\n開始時刻: 15:30",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := StartingSoon(mustProgram(t, tt.params)).Text; got != tt.want {
-				t.Errorf("Text:\n%q\nwant:\n%q", got, tt.want)
-			}
-		})
+func TestNewStartingSoon(t *testing.T) {
+	p := mustProgram(t, program.Params{Name: "基調講演", StartAt: time.Date(2026, 11, 3, 15, 30, 0, 0, jst)})
+	n := NewStartingSoon(p)
+	if n.Kind != KindStartingSoon || n.Program != p {
+		t.Errorf("種類と元のプログラムを持つはず: %+v", n)
 	}
 }
 
-func TestStartingSoon_Key(t *testing.T) {
+func TestNewStartingSoon_Key(t *testing.T) {
 	start := time.Date(2026, 11, 3, 15, 30, 0, 0, jst)
-	a := StartingSoon(mustProgram(t, program.Params{Name: "基調講演", StartAt: start}))
-	b := StartingSoon(mustProgram(t, program.Params{Name: "基調講演", StartAt: start}))
-	c := StartingSoon(mustProgram(t, program.Params{Name: "別のプログラム", StartAt: start}))
+	a := NewStartingSoon(mustProgram(t, program.Params{Name: "基調講演", StartAt: start}))
+	b := NewStartingSoon(mustProgram(t, program.Params{Name: "基調講演", StartAt: start}))
+	c := NewStartingSoon(mustProgram(t, program.Params{Name: "別のプログラム", StartAt: start}))
 
 	if a.Key != b.Key {
 		t.Errorf("同じプログラムなら同じキーのはず: %s / %s", a.Key, b.Key)
@@ -69,5 +50,24 @@ func TestStartingSoon_Key(t *testing.T) {
 	}
 	if len(a.Key) != 36 || strings.Count(a.Key, "-") != 4 || a.Key[14] != '5' {
 		t.Errorf("UUID v5 の形式ではない: %s", a.Key)
+	}
+}
+
+// 文面を、ドメインからテンプレートへ移しても、すでに送信した通知と同じキーになる(再送で、二重に配信されない)。
+func TestNewStartingSoon_KeyIsStable(t *testing.T) {
+	p := mustProgram(t, program.Params{ID: "program-1", Name: "基調講演", StartAt: time.Date(2026, 11, 3, 15, 30, 0, 0, jst)})
+	want := uuidV5(namespace, "starting-soon:program-1")
+	if got := NewStartingSoon(p).Key; got != want {
+		t.Errorf("キーの作り方が変わった: %s, want %s", got, want)
+	}
+}
+
+func TestKindsAreUnique(t *testing.T) {
+	seen := map[Kind]bool{}
+	for _, k := range AllKinds {
+		if k == "" || seen[k] {
+			t.Errorf("通知の種類が空、または重複している: %q", k)
+		}
+		seen[k] = true
 	}
 }

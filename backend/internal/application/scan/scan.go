@@ -74,7 +74,7 @@ func (u *UseCase) Execute(ctx context.Context) error {
 // notify は送信し、通知済みを保存する。
 // 送信後に保存へ失敗しても、次回の実行で同じキーの通知が重複として扱われ、二重送信にはならない。
 func (u *UseCase) notify(ctx context.Context, p *program.Program, now time.Time) error {
-	if err := u.Notifier.Notify(ctx, notice.StartingSoon(p)); err != nil {
+	if err := u.Notifier.Notify(ctx, notice.NewStartingSoon(p)); err != nil {
 		return fmt.Errorf("送信: %w", err)
 	}
 	if err := p.MarkNotified(now); err != nil {

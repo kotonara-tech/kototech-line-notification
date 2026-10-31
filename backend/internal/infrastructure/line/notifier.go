@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kotonara-tech/kototech-line-notification/backend/internal/domain/notice"
+	"github.com/kotonara-tech/kototech-line-notification/backend/internal/infrastructure/line/template"
 )
 
 const (
@@ -71,20 +72,20 @@ func NewNotifier(cfg Config) *Notifier {
 	}
 }
 
-type textMessage struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
 type broadcastRequest struct {
-	Messages []textMessage `json:"messages"`
+	Messages []template.Message `json:"messages"`
 }
 
 // Notify は通知を全友だちへ broadcast する。
 // 同じ Key のリクエストは、LINE 側で重複として扱われる(X-Line-Retry-Key)。
 // 重複(409)は、すでに配信が受け付けられているため、成功として扱う。
 func (n *Notifier) Notify(ctx context.Context, msg notice.Notice) error {
-	body, err := json.Marshal(broadcastRequest{Messages: []textMessage{{Type: "text", Text: msg.Text}}})
+	// 文面は、通知の種類ごとのテンプレート(template パッケージ)で作る
+	message, err := template.Render(msg)
+	if err != nil {
+		return fmt.Errorf("通知の文面の作成: %w", err)
+	}
+	body, err := json.Marshal(broadcastRequest{Messages: []template.Message{message}})
 	if err != nil {
 		return fmt.Errorf("リクエストの作成: %w", err)
 	}
