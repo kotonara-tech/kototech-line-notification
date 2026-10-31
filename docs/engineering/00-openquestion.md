@@ -35,7 +35,7 @@
 | D15 | GCP プロジェクトは ops / dev / prod の 3 つに分ける。ops には state バケットのみ置く | AWS のアカウント分割に相当。VPC は使わない |
 | D16 | GitHub Actions は reusable workflow(qa / deploy-backend)を `ci` と `deploy-to-*` から呼ぶ。dev は `develop` への push + 手動、prod は `main` への push + 手動(main 限定、承認あり) | main は prod の写し(operations/01-operations.md) |
 | D17 | リリースは `main` のコミットにタグ(`vMAJOR.MINOR.PATCH`)を付け、GitHub Releases にリリースノートを書く | バージョンと変更点の追跡 |
-| D18 | `main` の保護は開発が安定した最後に掛ける。それまで(フェーズ 1)は `develop` への直 push 可。保護後は PR 必須で、**他の人の Approve が 1 件必須**(自己承認・バイパスなし) | 初期の開発速度を優先し、安定後に品質を担保する |
+| D18 | `main` の保護は、開発が安定した最後に掛ける予定だった(D33 で、マージ方法の固定のため、PR 必須まで前倒しした)。承認は、PR 必須のうえで、**他の人の Approve が 1 件必須**(自己承認・バイパスなし)にする。Approve できるメンバーが揃ってから設定する | 初期の開発速度を優先しつつ、安定後に品質を担保する |
 | D19 | 全環境(ops / dev / prod)の課金アカウントは共通にする | 管理の簡素化 |
 | D20 | バックエンドは DDD の構成(domain / application / infrastructure / interfaces / bootstrap)とし、依存は内側(domain)へ向かう一方向とする | ビジネスルールを外部サービスの事情から分離する |
 | D21 | LINE のチャネルシークレットなどの秘匿情報は Secret Manager に保管し、Cloud Run が環境変数として注入する。アプリは Secret Manager API を呼ばない。使う Secret のみを注入する | 最小権限・SDK 依存の削減 |
@@ -50,3 +50,5 @@
 | D30 | LINE への通信は公式 SDK を使わず、標準 `net/http` で実装する。トークンの自動発行は `http.RoundTripper` で行う | トークンを自動で付ける仕組みを差し込みやすく、依存を増やさない |
 | D31 | インテグレーションテスト(読み取りのみ)は、`deploy-to-dev` で**インフラの適用のあと**に実行する。デプロイ用サービスアカウントが、**実行用サービスアカウントを借りて**(`serviceAccountTokenCreator`。Terraform が dev のみ付与)、本番の Job と同じ主体として工程表を読む。デプロイ用アカウントには、シートを共有しない | 本番と同じ主体で確認でき、実行用アカウントへの共有漏れを検知できる。借りる権限はインフラが作るため、インフラの後に実行する。prod には付与しない(CI の侵害で本番の工程表を読まれないため) |
 | D32 | 通知の文面は、Go のファイルの中の `text/template`(`infrastructure/line/template`、種類ごとに 1 ファイル)で作り、LINE に送る側(`infrastructure/line`)が、ドメインの `notice`(種類・元のプログラム・キー)を受け取って描画する。**通常はドメインに置く文面を、意図的に外へ出す** | 複数のテンプレートメッセージ(text・Flex など、送る形式が違うもの)を使うため。文面と LINE の形式はセットで変わり、ドメインに置くと形式の事情が入り込む。依存の向きは infrastructure → domain のまま |
+| D33 | マージ方法を Ruleset でブランチごとに固定する: `develop` 宛て(作業ブランチからの PR)は**スカッシュのみ**、`main` 宛て(リリース PR)は**マージコミットのみ**。Ruleset でマージ方法を指定するには、PR 必須を同時に有効にする必要があるため、**フェーズ 2 に移行**し、`develop` と `main` への直 push を止めた。承認数は 0(必須ステータスチェックと、他の人の Approve は、メンバーが揃ってから) | スカッシュで作業中のコミットをまとめつつ、リリース PR はマージコミットにして、`main` と `develop` の履歴がずれないようにする |
+| D34 | Issue・PR・ブランチの書き方を決める: ① Issue・PR のタイトルは、`【INFRA】【BE】【DOCS】【CORE】` のいずれかで始める ② 作業ブランチは `<種類>/<Issue番号>-<短い説明>` ③ PR は、先頭の `Closes #` で、必ず Issue と関連付ける ④ **1 PR で閉じるのは 1 Issue まで**(関わるだけなら `Ref #`) | 一覧から、領域と、どの Issue の作業かを分かるようにする。1 つの PR が複数の Issue を閉じると、変更の目的が混ざる |

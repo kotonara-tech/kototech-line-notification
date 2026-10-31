@@ -22,5 +22,6 @@
 - **作業が終わったら、報告・コミット・push の前に、必ず `make verify` を実行して、失敗を 0 にする**。GitHub Actions はローカルで動かせないため、`verify-professional` の論理検証のチェックリストで確認し、push 後は `gh run` で結果を確かめる
 - インフラは Terraform で管理し、GitHub Actions + OIDC でデプロイする。GAS は使わない
 - Terraform の `apply` は明示的に指示されるまで実行しない
-- ブランチ運用: `develop` を起点に作業し、`main` は prod の写し。開発が安定するまでは `develop` への直 push 可で、安定後に `main` を保護して PR + 他者の Approve を必須にする([docs/operations/01-operations.md](docs/operations/01-operations.md))
+- 作業は Issue から始める。ブランチは `<種類>/<Issue番号>-<短い説明>`(例: `chore/2-title-prefix`)。Issue・PR のタイトルは `【INFRA】【BE】【DOCS】【CORE】` で始める。PR の先頭に `Closes #番号` を書いて、必ず Issue と関連付ける。**1 PR で閉じるのは 1 Issue まで**([docs/operations/01-operations.md](docs/operations/01-operations.md))
+- ブランチ運用: `develop` を起点に作業し、`main` は prod の写し。`develop` と `main` は Ruleset で保護済みで、**直 push はできない**(作業ブランチを切って PR を作る。`develop` 宛てはスカッシュ、`main` 宛て(リリース)はマージコミット)。他の人の Approve の必須化は、メンバーが揃ってから([docs/operations/01-operations.md](docs/operations/01-operations.md))
 - 返答・ドキュメントは日本語で書く
