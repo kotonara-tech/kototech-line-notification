@@ -11,7 +11,7 @@
 - `backend/` バックエンド (Go, Cloud Run Job)。`make test` / `lint` / `integration-test` / `build`
 - `infra/terraform/` インフラ (`bootstrap` / `env/{dev,prod}` / `modules`)
 - `docs/infra/` インフラ構成図
-- `.claude/` 開発用スキル
+- `.claude/skills/` 開発用スキル: `go-professional`(backend の Go)、`infra-professional`(Terraform / GCP)、`docs-professional`(ドキュメント)。該当する作業の前に参照する
 
 ## 方針
 
