@@ -41,6 +41,8 @@ type Config struct {
 	SheetName     string
 	Location      *time.Location
 	Logger        *slog.Logger
+	// ImpersonateServiceAccount は、借りて呼び出すサービスアカウント(メールアドレス)。空なら借りない。
+	ImpersonateServiceAccount string
 }
 
 // columns は、ヘッダーから求めた列の位置(0 始まり。なければ -1)。
@@ -60,7 +62,7 @@ var _ program.Repository = (*Repository)(nil)
 
 // New は Google Sheets API を使う Repository を作る。
 func New(ctx context.Context, cfg Config) (*Repository, error) {
-	gw, err := newGoogleGateway(ctx, cfg.SpreadsheetID, cfg.SheetName)
+	gw, err := newGoogleGateway(ctx, cfg.SpreadsheetID, cfg.SheetName, cfg.ImpersonateServiceAccount)
 	if err != nil {
 		return nil, err
 	}

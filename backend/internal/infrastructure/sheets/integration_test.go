@@ -16,7 +16,9 @@ import (
 // 必要なもの:
 //   - SPREADSHEET_ID: dev の工程表のスプレッドシート ID
 //   - SHEET_NAME(任意): シート名。省略すると「工程表」
-//   - Application Default Credentials に、スプレッドシートを読める権限
+//   - IMPERSONATE_SERVICE_ACCOUNT(任意): 借りて読むサービスアカウント。CI では、本番の Job と同じ
+//     「実行用サービスアカウント」を指定する(実行用アカウントへの共有漏れも、このテストで検知できる)。
+//     空なら、Application Default Credentials の主体として読む
 //     (例: gcloud auth application-default login --scopes=https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/cloud-platform)
 func TestIntegration_ListAll(t *testing.T) {
 	id := os.Getenv("SPREADSHEET_ID")
@@ -32,7 +34,12 @@ func TestIntegration_ListAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo, err := sheets.New(t.Context(), sheets.Config{SpreadsheetID: id, SheetName: sheetName, Location: jst})
+	repo, err := sheets.New(t.Context(), sheets.Config{
+		SpreadsheetID:             id,
+		SheetName:                 sheetName,
+		Location:                  jst,
+		ImpersonateServiceAccount: os.Getenv("IMPERSONATE_SERVICE_ACCOUNT"),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

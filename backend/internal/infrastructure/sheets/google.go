@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"google.golang.org/api/googleapi"
+	impersonateapi "google.golang.org/api/impersonate"
 	"google.golang.org/api/option"
 	sheetsapi "google.golang.org/api/sheets/v4"
 )
@@ -24,8 +25,22 @@ type googleGateway struct {
 	sheetName     string
 }
 
-func newGoogleGateway(ctx context.Context, spreadsheetID, sheetName string) (*googleGateway, error) {
-	svc, err := sheetsapi.NewService(ctx, option.WithScopes(sheetsapi.SpreadsheetsScope))
+// newGoogleGateway は Sheets API のクライアントを作る。
+// impersonate が空でなければ、そのサービスアカウントのトークンを借りて呼び出す
+// (CI のインテグレーションテストが、本番の Job と同じ「実行用サービスアカウント」として読むため)。
+func newGoogleGateway(ctx context.Context, spreadsheetID, sheetName, impersonate string) (*googleGateway, error) {
+	opts := []option.ClientOption{option.WithScopes(sheetsapi.SpreadsheetsScope)}
+	if impersonate != "" {
+		ts, err := impersonateapi.CredentialsTokenSource(ctx, impersonateapi.CredentialsConfig{
+			TargetPrincipal: impersonate,
+			Scopes:          []string{sheetsapi.SpreadsheetsScope},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("サービスアカウント %s の借用: %w", impersonate, err)
+		}
+		opts = []option.ClientOption{option.WithTokenSource(ts)}
+	}
+	svc, err := sheetsapi.NewService(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("sheets API クライアントの作成: %w", err)
 	}
@@ -72,7 +87,7 @@ func explain(err error, sheetName string) error {
 	}
 	switch apiErr.Code {
 	case http.StatusForbidden:
-		return fmt.Errorf("sheets API: 権限がない。スプレッドシートを実行用サービスアカウントに共有(編集者)しているか確認する: %w", err)
+		return fmt.Errorf("sheets API: 権限がない。スプレッドシートを、実行用サービスアカウント(Cloud Run Job が使う。CI のテストも、これを借りて読む)に共有(編集者)しているか確認する: %w", err)
 	case http.StatusNotFound:
 		return fmt.Errorf("sheets API: スプレッドシート ID が違う、またはシート %q が存在しない: %w", sheetName, err)
 	case http.StatusBadRequest:
