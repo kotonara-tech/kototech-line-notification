@@ -25,10 +25,9 @@ resource "google_cloud_scheduler_job" "this" {
   time_zone   = var.time_zone
   paused      = var.paused
 
-  # 毎分の定期実行なので、失敗時の再試行はしない(次回の実行で拾う)
-  retry_config {
-    retry_count = 0
-  }
+  # 毎分の定期実行なので、失敗時の再試行はしない(次回の実行で拾う)。
+  # retry_config を書かない場合の既定が「再試行なし」。retry_count = 0 と書くと、
+  # API が値を返さないため plan のたびに差分が出る。
 
   attempt_deadline = var.attempt_deadline
 

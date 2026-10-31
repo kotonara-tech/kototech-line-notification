@@ -53,9 +53,9 @@ module "cloud_run_job_scan" {
     SPREADSHEET_ID = var.spreadsheet_id
   }
 
-  # scan が使う Secret のみ注入する(最小権限)。line-channel-secret は Webhook を受ける ROLE=api で注入する
   secret_env_vars = {
     LINE_CHANNEL_ACCESS_TOKEN = module.secret_manager.secret_ids["line-channel-access-token"]
+    LINE_CHANNEL_SECRET       = module.secret_manager.secret_ids["line-channel-secret"]
   }
 
   depends_on = [module.apis]

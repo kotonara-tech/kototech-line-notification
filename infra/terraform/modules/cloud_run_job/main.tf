@@ -51,6 +51,10 @@ resource "google_cloud_run_v2_job" "this" {
     }
   }
 
+  # Job は作成時に、実行用サービスアカウントが参照する Secret を読めるかを検証する。
+  # 参照だけでは依存が表せないため、権限の付与を先に済ませる(同時に作ると失敗することがある)
+  depends_on = [google_secret_manager_secret_iam_member.runtime_accessor]
+
   # イメージは GitHub Actions のデプロイで更新するため、Terraform では差分を無視する
   lifecycle {
     ignore_changes = [
