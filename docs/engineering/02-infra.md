@@ -121,8 +121,8 @@ infra/terraform/
 | `ci.yml` | QA のみ(`make verify` と同じ範囲) | PR の作成・コミットの追加・開き直し(毎回)、手動 |
 | `reusable-qa.yml` | backend の `make test` / `make lint` / `make build`、Terraform の `fmt` / `validate`、ドキュメントと yml の検査(`scripts/verify.mjs`) | 他から呼び出し |
 | `reusable-integration-test.yml` | インテグレーションテスト(`make integration-test`)。**実行用サービスアカウントを借りて**、実際の工程表を読めることを確認する(読み取りのみ) | 他から呼び出し |
-| `reusable-infra-deploy.yml` | Terraform の `init` → `validate` → `plan` → **削除のガード** → `apply`(`apply: false` で plan のみ。`allow_destroy: true` で削除を許可) | 他から呼び出し |
-| `reusable-deploy-backend.yml` | イメージのビルド → Artifact Registry へ push → Cloud Run Job のイメージ更新 | 他から呼び出し |
+| `reusable-infra-deploy.yml` | Terraform の `init` → `validate` → `plan` → **変更の有無の判定**(変更がなければ `apply` を飛ばす)→ **削除のガード** → `apply`(`apply: false` で plan のみ。`allow_destroy: true` で削除を許可) | 他から呼び出し |
+| `reusable-deploy-backend.yml` | **前回デプロイしたコミットとの差分の判定**(`backend/` に差分がなければ、以降を飛ばす)→ イメージのビルド → Artifact Registry へ push → Cloud Run Job のイメージ更新 | 他から呼び出し |
 | `deploy-to-dev.yml` | QA → インフラ(Terraform)→ **インテグレーションテスト** → アプリのデプロイ | `develop` への push、手動(任意のブランチ) |
 | `deploy-to-prod.yml` | QA → インフラ(Terraform)→ アプリのデプロイ | `main` への push、手動。`main` 以外は拒否 |
 | `apply-to-dev.yml` | **インフラ(Terraform)だけ**を適用する。QA とアプリのデプロイはしない。`apply` を false にすると plan だけ。`allow_destroy` を true にすると、削除を含む計画も適用する | 手動のみ(任意のブランチ) |
@@ -150,6 +150,7 @@ infra/terraform/
 - 変数の値の前後に空白があると、別の値として扱われる(prod の `GCP_PROJECT_ID` で実際に起きた)。`reusable-infra-deploy` / `reusable-deploy-backend` / `reusable-integration-test` は、`checkout` の直後に composite action `.github/actions/check-vars` で全変数を検査し、前後に空白や目に見えない文字(ゼロ幅スペース・BOM)のある変数名を示して失敗する。検査が出力するのは変数名と場所だけだが、全変数の値を `with:` / `env:` で渡すため、Actions のログ(このリポジトリは公開)には値が表示される。variables には秘匿情報を入れない(秘匿情報は Secret Manager)
 - Environment `prod` に Required reviewers を設定し、デプロイ前に承認を挟む
 - イメージは `<リポジトリ URL>/notifier:<コミット SHA>` でタグ付けする。Job の環境変数・Secret は Terraform の管理で、CD はイメージだけを更新する
+- **デプロイの要否は、差分の機械的な検出で決める**(コミットのメッセージなどには頼らない)。backend は、Job のイメージのタグ(前回デプロイしたコミット)と今のコミットの `backend/` の差分、インフラは、`plan` の変更の有無。判定できないときは、デプロイする。詳細は [../operations/01-operations.md](../operations/01-operations.md) の「差分がないときの動き」
 - Terraform は GitHub Actions から実行する(D22)。`reusable-infra-deploy.yml` が `plan` の結果を保存し、**そのプランをそのまま `apply`** する。`plan` の内容はジョブのサマリに出力される
 - **削除のガード**: `plan` の後、`apply` の前に、`terraform show -json` から、`delete` を含む変更(作り直しの `replace` を含む)の**リソースのアドレスとアクションだけ**を取り出す(`plan` の値は機密を含みうるため、出力しない)。1 件でもあり、入力 `allow_destroy`(既定 `false`)が `false` なら、`apply` を止めてジョブを失敗させ、一覧をステップサマリに出す。`apply: false`(plan のみ)のときは、失敗させず、警告として一覧を出す
 - `allow_destroy` は、`apply-to-dev` / `apply-to-prod` の手動実行の入力で、既定は `false`。`deploy-to-dev` / `deploy-to-prod` は渡さない(常に `false`)ため、削除を含む計画では、自動のデプロイがインフラの段階で止まる。意図した削除は、`apply` を false にして一覧を確かめてから、`apply-to-*` を `allow_destroy` を true にして実行する。削除や作り直しが起きたときの復旧は [../operations/02-recovery.md](../operations/02-recovery.md)

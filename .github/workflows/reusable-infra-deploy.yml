@@ -72,6 +72,25 @@ jobs:
       - name: plan
         run: terraform plan -input=false -lock-timeout=5m -out=tfplan
 
+      # plan に、実際の変更があるかを、保存した plan のファイルから機械的に判定する。
+      # コミットのメッセージなど、人が書くものには頼らない(書き忘れや誤記で、判定が狂わないため)。
+      # 変更がなければ、apply は何もしないので、飛ばす。変更に数えるのは、リソースの作成・更新・削除・作り直しと、出力の変更。
+      # data の読み取り(read)と、変更なし(no-op)は、数えない。読めないときは、止める(変更なしと見なさない)
+      - name: 変更の有無を判定する
+        id: changes
+        run: |
+          set -euo pipefail
+          plan_json="$(terraform show -json tfplan)"
+          printf '%s' "$plan_json" | jq -e '.format_version' > /dev/null || { echo '::error::terraform show -json の出力を読めないため、変更の有無を判定できない'; exit 1; }
+          count="$(printf '%s' "$plan_json" | jq '([(.resource_changes // [])[] | select(any(.change.actions[]; . != "no-op" and . != "read"))] | length) + ([(.output_changes // {}) | to_entries[] | select(any(.value.actions[]; . != "no-op"))] | length)')"
+          if [ "$count" -gt 0 ]; then
+            echo 'has_changes=true' >> "$GITHUB_OUTPUT"
+            echo "### インフラ(${{ inputs.environment }}): 変更 ${count} 件" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'has_changes=false' >> "$GITHUB_OUTPUT"
+            echo "### インフラ(${{ inputs.environment }}): plan に変更がないため、apply を飛ばす" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: plan summary
         run: |
           {
@@ -123,5 +142,5 @@ jobs:
 
       # plan で確認した内容をそのまま適用する
       - name: apply
-        if: inputs.apply
+        if: inputs.apply && steps.changes.outputs.has_changes == 'true'
         run: terraform apply -input=false -lock-timeout=5m tfplan

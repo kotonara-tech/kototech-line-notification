@@ -27,6 +27,8 @@ jobs:
       IMAGE: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY_URL }}/notifier:${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 前回デプロイしたコミットとの差分を取るため、全履歴を取得する
 
       # 変数の値の前後に空白がないかを、最初に確認する(ローカル action は、リポジトリの取得後でないと見つからない)
       - uses: ./.github/actions/check-vars
@@ -42,16 +44,45 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - uses: docker/setup-buildx-action@v3
+      # 前回デプロイした内容との差分を、機械的に判定する。差分がなければ、以降(ビルド・push・Job の更新)を飛ばす。
+      # 「前回デプロイした内容」は、Cloud Run Job が今使っているイメージのタグ(= デプロイしたコミットの SHA)から、
+      # 実際の状態として読む。コミットのメッセージなど、人が書くものには頼らない(書き忘れや誤記で、判定が狂わないため)。
+      # 判定できないとき(初期のイメージ、履歴にないコミット、取得の失敗)は、差分があるものとして、デプロイする(安全側)。
+      # 比べる範囲は backend/(イメージのビルドの文脈)だけ。
+      - name: 前回のデプロイとの差分を判定する
+        id: diff
+        run: |
+          set -euo pipefail
+          changed=true
+          reason='前回デプロイしたコミットを特定できないため、デプロイする'
+          image="$(gcloud run jobs describe "$JOB_NAME" --region "$REGION" \
+            --format='value(spec.template.spec.template.spec.containers[0].image)' 2>/dev/null || true)"
+          deployed="${image##*:}"
+          if [[ "$deployed" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${deployed}^{commit}" 2>/dev/null; then
+            if git diff --quiet "$deployed" "$GITHUB_SHA" -- backend/; then
+              changed=false
+              reason="backend/ に、前回デプロイした ${deployed:0:7} からの差分がないため、デプロイしない"
+            else
+              reason="backend/ に、前回デプロイした ${deployed:0:7} からの差分があるため、デプロイする"
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "### backend のデプロイ(${{ inputs.environment }}): $reason" >> "$GITHUB_STEP_SUMMARY"
+          echo "$reason"
 
-      - uses: docker/login-action@v3
+      - if: steps.diff.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - if: steps.diff.outputs.changed == 'true'
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGION }}-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
       # バイナリは 1 つ。役割は環境変数(ROLE)で切り替わるため、イメージも 1 つ
-      - uses: docker/build-push-action@v6
+      - if: steps.diff.outputs.changed == 'true'
+        uses: docker/build-push-action@v6
         with:
           context: backend
           push: true
@@ -61,6 +92,7 @@ jobs:
 
       # Job 本体と環境変数は Terraform が管理しているため、イメージだけを更新する
       - name: Update Cloud Run Job image
+        if: steps.diff.outputs.changed == 'true'
         run: |
           gcloud run jobs update "$JOB_NAME" \
             --image "$IMAGE" \
