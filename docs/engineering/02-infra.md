@@ -145,7 +145,7 @@ infra/terraform/
 - イメージは `<リポジトリ URL>/notifier:<コミット SHA>` でタグ付けする。Job の環境変数・Secret は Terraform の管理で、CD はイメージだけを更新する
 - Terraform は GitHub Actions から実行する(D22)。`reusable-infra-deploy.yml` が `plan` の結果を保存し、**そのプランをそのまま `apply`** する。`plan` の内容はジョブのサマリに出力される
 - Terraform の変数(`project_id` など)は、tfvars をコミットしないため、Environment の variables を `TF_VAR_*` として渡す
-- 変数の形式は、`variables.tf` の `validation` で検査する(`project_id`・`region`・`spreadsheet_id`・`line_channel_id`・`github_repository`・`notify_lead_minutes`。`bootstrap` は `state_bucket_name`・`state_admins` も)。Environment の variables の前後に空白が入ると、`plan` の前にエラーで止まる。エラーメッセージが、確認する GitHub 変数の名前を示す
+- 変数の形式は、`variables.tf` の `validation` で検査する(`project_id`・`region`・`spreadsheet_id`・`line_channel_id`・`github_repository`・`notify_lead_minutes`。`bootstrap` は `state_bucket_name`・`state_admins` も)。Environment の variables の前後に空白が入ると、`plan` がエラーで失敗し、`apply` まで進まない(`project_id`・`region` は provider の設定に使うため、リソースの計画より前に止まる)。エラーメッセージが、確認する GitHub 変数の名前を示す
 - `deploy-to-*` の順序は **QA → インフラ → アプリのデプロイ**。Cloud Run Job や Artifact Registry を Terraform が先に作ってから、イメージを更新する
 - Environment `prod` の承認は、ジョブごとに求められるため、prod では「インフラ」と「アプリのデプロイ」で 2 回承認する。承認前に `plan` を確認する形に分けたい場合は、承認を挟まない plan 専用の Environment を別に用意する方法がある(未実施)
 - PR 上での `plan` は未実装(`ci.yml` には含めていない)。`reusable-infra-deploy.yml` の `apply: false` で追加できる
