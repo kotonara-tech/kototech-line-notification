@@ -141,6 +141,7 @@ infra/terraform/
 | `SCHEDULER_PAUSED` | Scheduler を一時停止するか。未設定なら `true`。最初のデプロイ後に `false` にする |
 | `APP_ENV` | インテグレーションテスト用(dev のみ) |
 
+- 変数の値の前後に空白があると、別の値として扱われる(prod の `GCP_PROJECT_ID` で実際に起きた)。`reusable-infra-deploy` / `reusable-deploy-backend` / `reusable-integration-test` は、`checkout` の直後に composite action `.github/actions/check-vars` で全変数を検査し、前後に空白や目に見えない文字(ゼロ幅スペース・BOM)のある変数名を示して失敗する。検査が出力するのは変数名と場所だけだが、全変数の値を `with:` / `env:` で渡すため、Actions のログ(このリポジトリは公開)には値が表示される。variables には秘匿情報を入れない(秘匿情報は Secret Manager)
 - Environment `prod` に Required reviewers を設定し、デプロイ前に承認を挟む
 - イメージは `<リポジトリ URL>/notifier:<コミット SHA>` でタグ付けする。Job の環境変数・Secret は Terraform の管理で、CD はイメージだけを更新する
 - Terraform は GitHub Actions から実行する(D22)。`reusable-infra-deploy.yml` が `plan` の結果を保存し、**そのプランをそのまま `apply`** する。`plan` の内容はジョブのサマリに出力される

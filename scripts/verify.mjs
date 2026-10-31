@@ -113,6 +113,16 @@ check(
   }),
 );
 
+// ローカル action(uses: ./.github/actions/<名前>)の呼び出し先に、action.yml がないと、そのステップで失敗する
+check(
+  "呼び出すローカル action に、action.yml が存在する",
+  Object.entries(workflows).flatMap(([file, text]) =>
+    [...new Set([...text.matchAll(/^\s*-?\s*uses:\s*\.\/\.github\/actions\/([^\s'"]+)/gm)].map((m) => m[1].replace(/\/$/, "")))]
+      .filter((name) => !["action.yml", "action.yaml"].some((f) => existsSync(join(ROOT, ".github/actions", name, f))))
+      .map((name) => `${file}: .github/actions/${name}/action.yml が存在しない`),
+  ),
+);
+
 // 呼び出し先のジョブが id-token: write を要求するのに、呼び出し側が許可していないと、実行前にエラーになる
 check(
   "呼び出し先が id-token: write を要求するとき、呼び出し側も許可している",
