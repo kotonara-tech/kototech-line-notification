@@ -11,6 +11,10 @@ on:
         description: false なら plan のみ実行する
         type: boolean
         default: true
+      allow_destroy:
+        description: 削除(作り直しを含む)がある計画でも apply する。false(既定)では、1 件でもあれば apply を止める
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,6 +75,46 @@ jobs:
             terraform show -no-color tfplan
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # 削除(replace を含む)がある計画は、allow_destroy が true のときだけ apply に進める。
+      # Environment の承認はジョブの開始時に求められ、plan を見る前になるため、この検査が止め役になる。
+      # plan の JSON には機密の値が含まれうるため、ファイルに残さず、リソースのアドレスとアクションだけを出力する
+      - name: destroy guard
+        env:
+          APPLY: ${{ inputs.apply }}
+          ALLOW_DESTROY: ${{ inputs.allow_destroy }}
+        run: |
+          set -euo pipefail
+          plan_json="$(terraform show -json tfplan)"
+          # 空や壊れた出力のまま、削除なしと判定して通さない
+          printf '%s' "$plan_json" | jq -e '.format_version' > /dev/null || { echo '::error::terraform show -json の出力を読めないため、apply を止めた'; exit 1; }
+          # actions に delete を含むものが、削除と replace(delete と create の組)。resource_changes が無い計画は 0 件
+          changes="$(printf '%s' "$plan_json" | jq -c '[(.resource_changes // [])[] | select(any(.change.actions[]; . == "delete")) | {address, actions: .change.actions}]')"
+          count="$(printf '%s' "$changes" | jq 'length')"
+
+          if [ "$count" -eq 0 ]; then
+            echo '削除を含む変更: なし' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "### 削除を含む変更: ${count} 件"
+            echo
+            echo '`delete` は削除、`delete` と `create` の組は作り直し(replace)。'
+            echo
+            echo '| リソース | アクション |'
+            echo '| --- | --- |'
+            printf '%s' "$changes" | jq -r '.[] | "| `\(.address)` | \(.actions | join(", ")) |"'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          if [ "$APPLY" = 'false' ]; then
+            echo "::warning::削除を含む変更が ${count} 件ある(plan のみのため、apply はしない)"
+          elif [ "$ALLOW_DESTROY" = 'true' ]; then
+            echo "::warning::削除を含む変更が ${count} 件ある。allow_destroy が true のため、apply に進む"
+          else
+            echo "::error::削除を含む変更が ${count} 件ある。allow_destroy が false のため、apply を止めた。一覧はステップサマリを確認する"
+            exit 1
+          fi
 
       # plan で確認した内容をそのまま適用する
       - name: apply
