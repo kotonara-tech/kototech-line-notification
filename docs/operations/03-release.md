@@ -4,7 +4,7 @@
 
 リリースは、`develop` → `main` の PR のマージと、そのあとの `deploy-to-prod` の手動起動で行う。`main` への push では、`deploy-to-prod` は起動しない。起動では、最新の `main` の先頭の SHA を入力する。最初のジョブ `guard` が入力を検査し、通ると、QA → インフラ(Terraform)→ アプリのデプロイの順に、prod へ反映する([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)。
 
-**検証の状態**: この手順書は、workflow・設定・`gh` の読み取りで確かめて書いた。リリースを通して実行しての確認は、未実施。手動起動と SHA の入力(`guard`)も、実際の実行では未確認(判定のシェルは、ローカルで確かめた)。最初のリリースで確かめ、食い違いを直す。
+**検証の状態**: この手順書は、workflow・設定・`gh` の読み取りで確かめて書いた。リリースを通して実行しての確認は、未実施。手動起動と SHA の入力(`guard`)も、実際の実行では未確認(判定のシェルは、ローカルで確かめた)。確かめる項目は「最初の起動で確かめること」にある。最初のリリースで確かめ、食い違いを直す。
 
 ## 前提
 
@@ -117,11 +117,12 @@
 7. 起動した `deploy-to-prod` を見る
 
    ```
-   gh run list --workflow deploy-to-prod.yml --branch main --limit 1
+   gh run list --workflow deploy-to-prod.yml --event workflow_dispatch --branch main --limit 5 --json databaseId,headSha,createdAt,status
    gh run watch <ID>
    ```
 
-   ジョブは、`guard` → `qa`(3 つ)→ `infra`(`terraform (plan / apply)`)→ `deploy`(`deploy`)の順に動く。前のジョブが失敗すると、後ろは動かない
+   - `headSha` が手順 5 の SHA と一致する実行のうち、`createdAt` が最も新しいものを選び、その `databaseId` を `<ID>` にする。起動の直後は、一覧に出ないことがある。出るまで数秒おいて、実行し直す。1 つ前の実行を選ぶと、古い結果を見て成功と思い込む
+   - ジョブは、`guard` → `qa`(3 つ)→ `infra`(`terraform (plan / apply)`)→ `deploy`(`deploy`)の順に動く。前のジョブが失敗すると、後ろは動かない
 8. Required reviewers が設定されているときだけ、承認者が承認する。`infra` と `deploy` は、それぞれ承認待ちになる([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)。承認は、Actions の実行の画面から行う
    - 承認の画面では `plan` の内容が見えない。承認の前に、`qa` が成功していることと、事前確認の 3・4 を済ませたことを確かめる
    - 迷ったときは、承認せずキャンセルして、[02-recovery.md](02-recovery.md) の「防ぐ仕組み」に従う
@@ -194,9 +195,37 @@ git fetch --tags origin
 | `deploy` が失敗する | `infra` は成功済み | `gh run view <ID> --log-failed` で原因を読む。直ったら、`main` が進んでいないことを確かめて、`gh run rerun <ID> --failed`(下の説明)。進んでいるときは、新しい SHA で起動し直す |
 
 - 失敗したジョブだけの再実行(`gh run rerun <ID> --failed`)は、元の実行と同じコミット(`github.sha`)で動き、成功済みの `guard` は再実行されない。そのため、`main` が進んでいても検査されず、古い SHA のコミットが prod に出る。再実行の前に、`git fetch origin` のあと `git rev-parse origin/main` が、元の実行で入力した SHA と同じであることを確かめる。違うときは、再実行せず、手順 5 から取り直して起動し直す(新しいコミットを出した実行のあとに、古いコミットの内容を適用して、巻き戻すのを避けるため)
-- 全ジョブの再実行(`gh run rerun <ID>`)は、`guard` も再実行され、`main` が進んでいれば失敗する。入力 `sha` が元の実行と同じ値で渡されるかは未確認。`guard` が失敗したら、新しい SHA で起動し直す([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)
+- 全ジョブの再実行(`gh run rerun <ID>`)は、`guard` も再実行される。入力 `sha` の引き継ぎは未確認([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)。`guard` が失敗したら、新しい SHA で起動し直す
 - prod を前の状態に戻す専用の手順は、決まっていない(Q23)。問題の変更を取り消す修正を、通常のリリースか、hotfix で出す
 - 復旧のあとの再実行は、[02-recovery.md](02-recovery.md) の「デプロイを再実行する」に従う
+
+## 最初の起動で確かめること
+
+`guard` は、GitHub Actions 上の実行では確かめていない(判定のシェルだけ、ローカルで確かめた)。最初のリリースで、次を確かめる。食い違いがあれば、この手順書と [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」を直す。
+
+1. 古い SHA で、`guard` が失敗すること(prod は変わらない)。リリース PR のマージのあと、手順 5・6 の前に、マージ前の `main` の先頭を入れて起動する
+
+   ```
+   git fetch origin
+   gh workflow run deploy-to-prod.yml --ref main -f sha=$(git rev-parse origin/main^1)
+   ```
+
+   `origin/main^1` は、マージコミットの第 1 親(マージ前の `main` の先頭)。
+
+   - `guard` が「入力 sha ... 一致しない」で失敗し、`qa` 以降が「skipped」になること
+   - 万一 `guard` が通ってしまったら、すぐに実行をキャンセルする(承認者が未設定のあいだは、`qa` の成功のあとに、承認なしで `infra` が進む)
+   - この失敗した実行を、全ジョブで再実行(`gh run rerun <ID>`)すると、入力 `sha` が引き継がれるかが分かる。引き継がれれば、同じ「一致しない」で失敗する。引き継がれなければ、「40 桁の 16 進ではない」で失敗する(どちらも prod は変わらない)
+2. `main` 以外の ref で、`guard` が失敗すること。この変更が `develop` に入ったあとなら、リリースの前に試せる
+
+   ```
+   git fetch origin
+   gh workflow run deploy-to-prod.yml --ref develop -f sha=$(git rev-parse origin/develop)
+   ```
+
+   - `guard` が「起動した ref が refs/heads/main ではない」で失敗し、`qa` 以降が「skipped」になること
+3. 正しい SHA の実際の起動(手順 6)で、`guard` が成功し、`qa` 以降が動くこと
+   - `guard` のステップサマリに、「prod の起動の検査: <SHA> は、いまの main の先頭と一致した」と出ること(`github.token` で `main` の先頭を取得できている)
+   - `infra` と `deploy` の `actions/checkout` が取得したコミットが、入力した SHA と同じであること(実行のログで読む)。同じでなければ、`guard` が確かめた SHA と、デプロイされるコミットが違う
 
 ## hotfix
 

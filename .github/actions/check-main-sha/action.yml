@@ -18,24 +18,14 @@ description: 手動起動した prod 系の実行が、いまの main の先頭�
 #
 # 検査(すべて満たさなければ、失敗する):
 #   1. 起動した ref が refs/heads/main
-#   2. 入力 sha が 40 桁の 16 進(大文字小文字は同一視。短縮した SHA や、前後の空白・改行は不可)
-#   3. 入力 sha が、いまの main の先頭と一致する。先頭は、チェックアウト済みのものではなく、実行時に GitHub の API で取得する。
-#      取得に失敗したり、読めない値が返ったりしたときは、通さずに失敗する(fail-closed)
+#   2. 入力 sha が 40 桁の 16 進(大文字小文字は同一視)
+#   3. 入力 sha が、実行時に GitHub の API で取得した、いまの main の先頭と一致する(取得に失敗したら、通さずに失敗する)
 #   4. 起動したコミット(GITHUB_SHA)が、同じ先頭と一致する
 #
-# デプロイ / 適用されるコミットが、入力した SHA と同じになる理由:
-#   続くジョブが呼ぶ reusable workflow は、actions/checkout を ref の指定なしで使う。この既定は、起動したイベントの SHA(GITHUB_SHA)を
-#   取得する。reusable workflow の中でも、github コンテキストは、起動した側(caller)のもの。GITHUB_SHA は、起動した時点で固定され、
-#   途中で main が進んでも変わらない。ここで、GITHUB_SHA = 入力 sha = main の先頭 を確かめるので、取得されるのは入力 sha のコミット。
-#   (reusable-*.yml には SHA を渡さず、渡す入力もない)
-# 成り立たなくなる場合:
-#   - guard のあとに main が進んだ場合。続くジョブは、入力 sha のコミットを使い続ける(入力した SHA は出るが、最新の main ではなくなる)。
-#     実行の途中では、検査し直さない。最新の main を出すときは、新しい SHA で起動し直す。古い実行は、承認待ちの間にキャンセルする
-#   - 失敗したジョブだけの再実行(gh run rerun <ID> --failed)。成功済みの guard は再実行されないので、main が進んでいても検査し直さない。
-#     全ジョブの再実行(gh run rerun <ID>)なら、guard が検査し直し、main が進んでいれば失敗する(GITHUB_SHA は元の実行と同じ)
-#   - 起動する ref のワークフロー定義が使われる。guard を外した別ブランチの定義は、この検査では止まらない(prod の Workload Identity の
-#     条件が、refs/heads/main 以外からの認証を拒否する)
-# 詳細は docs/engineering/02-infra.md の「CD」。
+# 仕様の正本は docs/engineering/02-infra.md の「CD」。次の点も、そちらに書いてある。
+#   - デプロイ / 適用されるコミットが、入力 sha と同じになる理由。reusable の actions/checkout が ref なしで github.sha を取る前提による
+#     (reusable-*.yml に ref: を足すと崩れる)
+#   - この検査が守れない場合(guard のあとに main が進んだとき、失敗したジョブだけの再実行、別ブランチの定義)
 
 inputs:
   sha:
@@ -65,7 +55,8 @@ runs:
 
         [ "$GITHUB_REF" = 'refs/heads/main' ] || fail "起動した ref が refs/heads/main ではない(${GITHUB_REF})。--ref main を付けて起動する"
 
-        # 形式を確かめる前の値は、ログに出さない(長さだけ出す)
+        # このスクリプトは、形式を確かめる前の値を出力しない(長さだけ出す)。改行を含む値をエコーすると、workflow コマンドを注入できてしまうため。
+        # なお、Actions は、ステップの env: と呼び出し側の with: の値を実行ログに表示する(入力 sha もログに出る。sha は秘匿情報ではない)
         [[ "$SHA_INPUT" =~ $sha_re ]] || fail "入力 sha が 40 桁の 16 進ではない(長さ ${#SHA_INPUT})。短縮した SHA や、前後の空白・改行は受け付けない"
 
         # 取得に失敗したときは、通さずに失敗する。gh が無い、認証がない、404、ネットワークの失敗のいずれも、ここで止まる

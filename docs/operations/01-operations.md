@@ -4,7 +4,7 @@
 
 | ブランチ | 役割 | 保護 | デプロイ先 |
 | --- | --- | --- | --- |
-| `main` | **本番(prod)の写し**。main の内容 = prod にデプロイされているもの | あり(下記) | prod |
+| `main` | **本番(prod)の写し**。main の内容 = prod にデプロイされているもの(prod への反映は手動起動のため、起動するまでは古い `main` のまま。ずれの自動の検知は未実施) | あり(下記) | prod |
 | `develop` | 開発の統合ブランチ。作業の起点 | あり(Ruleset `develop-squash-only`。PR 必須・スカッシュのみ・削除と force push の禁止) | dev |
 | `feature/*` など | 個別の作業ブランチ。`develop` から切る | なし | なし(手動で dev へデプロイ可) |
 
@@ -203,7 +203,7 @@ GitHub の Settings → Rules → Rulesets で設定している。リポジト�
 
 - Terraform の変更も、通常のコードと同じ PR フローで扱う(`ci` で `fmt` / `validate` を検証)
 - `apply` は GitHub Actions から実行する(D22)。`deploy-to-dev` / `deploy-to-prod` の中で、QA の後・アプリのデプロイの前に `reusable-infra-deploy` が走る
-- 削除(作り直しを含む)を含む計画は、`deploy-to-*` が止まる。意図した削除は、`apply-to-*` を `allow_destroy` を `true` にして実行する(まず `apply` を false にして一覧を確かめる)。詳細は [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」、復旧は [02-recovery.md](02-recovery.md)
+- 削除(作り直しを含む)を含む計画は、`deploy-to-*` が止まる。意図した削除は、`apply-to-*` を `allow_destroy` を `true` にして実行する(まず `apply` を false にして一覧を確かめる。`apply-to-prod` は、最新の `main` の SHA(`sha`)も入力する)。詳細は [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」、復旧は [02-recovery.md](02-recovery.md)
 - 最初の `apply`(OIDC ができる前)だけは、担当者が手元で実行する
 - prod の `plan` / `apply` は、Workload Identity の条件により `main` からのみ実行できる
 

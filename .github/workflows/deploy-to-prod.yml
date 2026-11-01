@@ -4,7 +4,7 @@ name: deploy-to-prod
 #   gh workflow run deploy-to-prod.yml --ref main -f sha=<最新の main の SHA>
 # 最初のジョブ guard が、入力が最新の main と一致しないとき(古い SHA・短い SHA・main 以外など)に失敗し、以降のジョブを動かさない。
 # 続くジョブは、起動したコミット(github.sha)をデプロイする。guard が、それが入力した SHA と同じであることを確かめる。
-# 同じになる理由と、成り立たなくなる場合は、.github/actions/check-main-sha/action.yml と docs/engineering/02-infra.md の「CD」。
+# 同じになる理由と、成り立たなくなる場合は、docs/engineering/02-infra.md の「CD」。
 # Workload Identity の条件で refs/heads/main 以外は認証が拒否される。
 # GitHub の Environment `prod` に Required reviewers を設定して承認を挟む。
 on:
