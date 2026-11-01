@@ -94,7 +94,7 @@ infra/terraform/
 2. `terraform fmt -recursive` → `terraform validate`(`init -backend=false` で検証できる)
 3. `plan` の差分を読む。**作り直し(replace)と削除(destroy)を特に探す**。意図しない差分があれば原因を調べてから進める
 4. CI では plan を保存し、その**保存したプランをそのまま `apply`** する(plan と apply の間で内容がずれない)
-5. prod は `main` からのみ。Environment の承認は挟まない(D36)ので、`apply` の前に計画を読むには、先に `apply-to-prod` を `apply` なし(plan のみ)で実行する。コードで止めるのは削除のガードだけ。守る仕組みは `docs/engineering/02-infra.md` の「prod の保護(承認なし)」
+5. prod は `main` からのみ。Environment の承認は挟まない(D36)ので、`apply` の前に計画を読むには、先に `apply-to-prod` を `apply` なし(plan のみ)で実行する。`plan` の中身を見て止めるのは削除のガードだけ(変数の空白は `check-vars` と `validation`、SHA の不一致は `guard` が止める)。起動の直後に、ジョブ名が `terraform (plan)` であることを確かめる(`-f apply=false` の付け忘れを防ぐ)。守る仕組みは `docs/engineering/02-infra.md` の「prod の保護(承認なし)」
 
 作成時にエラーが出ても、リソース自体は作られて健全なことがある(IAM の反映待ちなど)。Terraform はそのリソースを `tainted` にして、次の `apply` で**削除して作り直そうとする**。`deletion_protection` が有効だと削除で止まるため、先に実体の状態(`gcloud` で確認)を見て、健全なら `terraform untaint` で印を外してから `plan` を確認する。
 

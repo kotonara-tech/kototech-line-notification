@@ -111,16 +111,18 @@
    ```
    gh workflow run apply-to-prod.yml --ref main -f sha=<5 で取った SHA> -f apply=false
    gh run list --workflow apply-to-prod.yml --event workflow_dispatch --branch main --limit 5 --json databaseId,headSha,createdAt,status
+   gh run view <ID> --json jobs --jq '.jobs[].name'
    gh run watch <ID>
    gh run view <ID> --web
    ```
 
    - `<ID>` の選び方は、手順 8 と同じ(`headSha` が手順 5 の SHA と一致する実行のうち、`createdAt` が最も新しいもの)
+   - **起動の直後に、`gh run watch` の前に**、`infra` ジョブの名前が `terraform (plan)` であることを確かめる(2 つ目の `gh run view`)。`apply` の既定は true で、承認を待たないので、`-f apply=false` を付け忘れると、そのまま prod へ `apply` される。名前が `terraform (plan / apply)` なら、`apply` が始まる前に、すぐに `gh run cancel <ID>` でキャンセルする(「起動した実行を止める」)。ジョブ名が一覧に出る時点と、そこから `apply` が始まるまでの時間は、実行では未確認
    - この実行は prod を変えない(`apply: false` のため、`apply` のステップは動かない)。`allow_destroy` は渡さない
    - 開いた実行の画面の Summary で、`infra` ジョブ(`terraform (plan)`)のステップサマリを読む
      - 「削除を含む変更」が「なし」であること。**plan のみの実行では、削除があっても失敗にならず、警告とサマリの一覧になる**(`apply` しないため)。必ず読む
      - 「terraform plan (prod)」の中身に、意図しない作成・更新がないこと。「plan に変更がないため、apply を飛ばす」が出るときは、インフラの変更がない
-   - 削除を含む変更が出たとき、または意図しない変更があるときは、手順 7 に進まない。原因を調べる(「失敗したとき」)。変数の空白などの原因は、[02-recovery.md](02-recovery.md) の「防ぐ仕組み」
+   - 削除を含む変更が出たとき、または意図しない変更があるときは、手順 7 に進まない。「失敗したとき」の、手順 6 の行に従う。変数の空白などの原因は、[02-recovery.md](02-recovery.md) の「防ぐ仕組み」
    - 本番の実行(手順 7)は `plan` をやり直す。手順 6 から 7 までのあいだに、GitHub の変数を変えない。別の変更が `main` に入ると、取った SHA が古くなり、手順 7 の `guard` が失敗する。そのときは、5 から取り直して、6 からやり直す
 7. `deploy-to-prod` を手動で起動する。**承認は待たない**(D36)ので、`guard` と `qa` が通ると、`infra` が `plan` のあと、そのまま `apply` に進む(削除を含む計画だけは、削除のガードが止める)
 
@@ -130,7 +132,7 @@
 
    - `--ref main` を必ず付ける。省略すると、既定ブランチ(`develop`)で動こうとして、`guard` が失敗する
    - 最初のジョブ `guard` が、起動した ref・SHA の形式・入力が最新の `main` の先頭と一致するか・起動したコミットが同じ先頭と一致するかを確かめる。1 つでも満たさないと失敗して、以降は動かない(「失敗したとき」)
-   - 手順 5 から起動までのあいだに別の変更が `main` に入ると、取った SHA が古くなり、`guard` が失敗する。そのときは、5 から取り直して、起動し直す
+   - 手順 5 から起動までのあいだに別の変更が `main` に入ると、取った SHA が古くなり、`guard` が失敗する。そのときは、5 から取り直し、6(plan のみ)からやり直す
    - 起動したあとに止めたくなったら、すぐに「起動した実行を止める」に従う
 8. 起動した `deploy-to-prod` を見る
 
@@ -141,13 +143,15 @@
 
    - `headSha` が手順 5 の SHA と一致する実行のうち、`createdAt` が最も新しいものを選び、その `databaseId` を `<ID>` にする。起動の直後は、一覧に出ないことがある。出るまで数秒おいて、実行し直す。1 つ前の実行を選ぶと、古い結果を見て成功と思い込む
    - ジョブは、`guard` → `qa`(3 つ)→ `infra`(`terraform (plan / apply)`)→ `deploy`(`deploy`)の順に動く。承認待ちはない。前のジョブが失敗すると、後ろは動かない
-   - 実行を見ているあいだに `main` が進んだときは、この実行は、入力した古い SHA のコミットのまま進む(`guard` は検査し直さない)。`apply` が始まる前なら、キャンセルし、手順 5 から取り直して、起動し直す(「起動した実行を止める」)
+   - 実行を見ているあいだに `main` が進んだときは、この実行は、入力した古い SHA のコミットのまま進む(`guard` は検査し直さない)。`apply` が始まる前なら、キャンセルし、手順 5 から取り直し、手順 6(plan のみ)からやり直す(「起動した実行を止める」)
 9. 「確認」を行う
 10. 「タグとリリースノート」を行う
 
 ## 起動した実行を止める
 
 Environment `prod` は承認を待たない(D36)ので、実行を止める手段は、起動の前の確認(手順 6)と、起動したあとのキャンセルだけ。`infra` の `apply` が**始まる前**なら、キャンセルしても prod は変わらない。始まったあとは、止めない。
+
+実行中の画面で `plan` を読んでから止めることは、当てにしない。`infra` ジョブでは、`plan` のサマリ、削除のガード、`apply` が連続して動き、人が待つステップはないため、読み終えるまでに `apply` が始まりうる(所要時間は実行では未確認)。計画の確認は、手順 6 で済ませる。キャンセルは、`main` が進んだ、`-f apply=false` を付け忘れた、誤った入力で起動した、などのときのため。
 
 ```
 gh run cancel <ID>
@@ -156,9 +160,9 @@ gh run cancel <ID>
 | 実行の状態 | 止めるか | 理由 |
 | --- | --- | --- |
 | `guard`・`qa` | キャンセルしてよい | prod のリソースを変えるステップが、まだ動いていない |
-| `infra` の、`apply` より前のステップ(`check-vars`・リリース元の検査・認証・`init`・`validate`・`plan`・変更の有無の判定・サマリ・削除のガード) | キャンセルしてよい | `apply` が始まっておらず、prod は変わらない。`plan` の途中でキャンセルしたとき、state のロックが残らないかは未確認 |
-| `infra` の `apply` が実行中 | **キャンセルしない**。終わるのを待つ | `terraform apply` を途中で止めると、一部のリソースだけが変わった状態や、state のロックが残った状態になり、state が壊れるおそれがある。ワークフローも、`apply` を途中で中断させない作りにしている(`reusable-infra-deploy.yml` の `concurrency`、`cancel-in-progress: false`) |
-| `infra` が成功し、`deploy` が実行中 | キャンセルできるが、インフラだけが新しい状態になる | `deploy` は Terraform を動かさないので、state は壊れない。`infra` で適用された変更は戻らず、Job のイメージは古いまま(更新の途中でないかは、「確認」の 2 で読む)。直すときは、SHA を取り直して(手順 5)、`deploy-to-prod` を起動し直す(`infra` は、変更がなければ `apply` を飛ばす) |
+| `infra` の、`apply` より前のステップ(`check-vars`・リリース元の検査・認証・`init`・`validate`・`plan`・変更の有無の判定・サマリ・削除のガード) | キャンセルしてよい | `apply` が始まっておらず、prod は変わらない。`plan` の途中でキャンセルしたとき、state のロックが残らないかは未確認(残ったときは、「失敗したとき」の、`plan` 中のキャンセルの行) |
+| `infra` の `apply` が実行中 | **キャンセルしない**。終わるのを待つ | `terraform apply` を途中で止めると、一部のリソースだけが変わった状態や、state のロックが残った状態になり、state が壊れるおそれがある。`reusable-infra-deploy.yml` の `concurrency`(`cancel-in-progress: false`)は、あとから起動した実行が、実行中の `apply` を自動で取り消さないための設定で、`gh run cancel` などの手動のキャンセルは止めない |
+| `infra` が成功し、`deploy` が実行中 | キャンセルできるが、インフラだけが新しい状態になる | `deploy` は Terraform を動かさないので、state は壊れない。`infra` で適用された変更は戻らず、Job のイメージは古いまま(更新の途中でないかは、「確認」の 2 で読む)。直すときは、SHA を取り直して(手順 5)、手順 6(plan のみ)からやり直し、`deploy-to-prod` を起動し直す(`infra` は、変更がなければ `apply` を飛ばす) |
 
 `apply` が始まったかは、キャンセルの**直前**に読む。
 
@@ -169,7 +173,7 @@ gh run view <ID> --json jobs --jq '.jobs[] | select(.name | startswith("infra"))
 - `apply` の `status` が `in_progress` のときは、キャンセルしない。`completed` のときは、`conclusion` が `success` なら適用済み、`skipped` なら適用していない(変更がない、または plan のみ)。それ以外で、まだ始まっていないときは、キャンセルしてよい(始まる前の `status` の値は、実際の実行では未確認)
 - ジョブ名が `terraform (plan)` の実行は plan のみで、`apply` のステップは飛ばされる。prod は変わらない
 - 読んでからキャンセルするまでのあいだに、`apply` が始まることがある。`apply` の実行中にキャンセルが届いたときは、「失敗したとき」の対処に従う
-- キャンセルしたあとは、原因を直し、SHA を取り直して(手順 5)、手順 6 からやり直す
+- キャンセルしたあとは、原因を直し、SHA を取り直して(手順 5)、手順 6 からやり直す。やり直しの `plan` が state のロックで失敗したら、「失敗したとき」の、`plan` 中のキャンセルの行に従う
 
 ## 確認
 
@@ -227,16 +231,18 @@ git fetch --tags origin
 | 症状 | 状態 | 対処 |
 | --- | --- | --- |
 | リリース PR の `ci` が失敗する | `main` は変わらない | `develop` を直す(作業ブランチ → `develop` の PR)。リリース PR の head は `develop` なので、PR に反映され、`ci` が再実行される |
-| `deploy-to-prod` の `guard` が失敗する | `qa` 以降は動かず、prod は変わらない | 失敗のメッセージ(Actions の実行の画面のアノテーション。`gh run view <ID> --log-failed`)を読む。起動した ref が `main` でない、SHA が 40 桁の 16 進でない、SHA が最新の `main` の先頭と違う、起動したコミットが最新の `main` の先頭と違う、先頭を取得できない、のいずれか。手順 5 から SHA を取り直して、起動し直す。取得できないときは、時間をおいて起動し直す |
+| `deploy-to-prod` の `guard` が失敗する | `qa` 以降は動かず、prod は変わらない | 失敗のメッセージ(Actions の実行の画面のアノテーション。`gh run view <ID> --log-failed`)を読む。起動した ref が `main` でない、SHA が 40 桁の 16 進でない、SHA が最新の `main` の先頭と違う、起動したコミットが最新の `main` の先頭と違う、先頭を取得できない、のいずれか。手順 5 から SHA を取り直し、手順 6(plan のみ)からやり直す。取得できないときは、時間をおいて、同じ手順を起動し直す |
 | `deploy-to-prod` の `qa` が失敗する | `infra` と `deploy` は動かず、prod は変わらない。ただし `main` は更新済み | 一時的な失敗で、`main` が進んでいないなら、`gh run rerun <ID> --failed`(下の説明)。コードの問題なら、直して再度リリースするか、急ぐなら hotfix で出す |
 | `infra` が「削除を含む変更」で止まる(意図しない削除) | 削除のガードが、`apply` の前に止めた。prod は変わらない。`deploy` は動いていない | ステップサマリの一覧を読む。意図したものと確かめられるまで、`allow_destroy` を `true` にしない。変数の空白などの原因を調べる([02-recovery.md](02-recovery.md)) |
-| `infra` が「削除を含む変更」で止まる(意図した削除) | 同上 | [01-operations.md](01-operations.md) の「インフラ(Terraform)の変更」の手順で適用する。適用したら、SHA を取り直して(手順 5)、`gh workflow run deploy-to-prod.yml --ref main -f sha=<最新の main の SHA>` で再度起動する(`infra` は変更なしで飛ばされ、`deploy` が動く)。そのあと、「確認」と「タグとリリースノート」を行う |
+| `infra` が「削除を含む変更」で止まる(意図した削除) | 同上 | [01-operations.md](01-operations.md) の「インフラ(Terraform)の変更」の手順で適用する。適用したら、SHA を取り直して(手順 5)、手順 6(plan のみ)で変更がないことを確かめてから、`gh workflow run deploy-to-prod.yml --ref main -f sha=<最新の main の SHA>` で再度起動する(`infra` は変更なしで飛ばされ、`deploy` が動く)。そのあと、「確認」と「タグとリリースノート」を行う |
 | `apply` のあとに、想定外の削除や作り直しが起きた | `apply` 済み | [02-recovery.md](02-recovery.md) の手順に従う。復旧するのはオーナー |
+| 手順 6 の `plan` のみの実行で、意図しない変更・削除が見えた | `main` は更新済み。`apply: false` のため、prod は変わらない(削除があっても、plan のみの実行は失敗にならず、警告とサマリの一覧になる) | 手順 7 に進まない。原因が GitHub の変数(空白など)なら、変数を直し([02-recovery.md](02-recovery.md) の「防ぐ仕組み」)、手順 6 からやり直す。原因がコードなら、取り消す修正を hotfix(または通常のリリース)で出し、SHA を取り直して(手順 5)、手順 6 からやり直す。意図した削除なら、「`infra` が「削除を含む変更」で止まる(意図した削除)」の行の手順に従う |
+| キャンセルが、`infra` の `plan` の実行中に届いた。または、やり直した `plan` が `Error acquiring the state lock` で失敗する | `apply` は始まっておらず、リソースは変わらない。state のロックが残った可能性がある(残るかは、実行では未確認。`plan` は `-lock-timeout=5m` のため、ロックが残っていると、やり直しの `plan` は 5 分待って失敗する) | 他の `plan` や `apply`(`gh run list --status in_progress`)が動いていないことを確かめてから、オーナーが手元で、エラーに出た Lock ID を使って `terraform force-unlock <Lock ID>` を実行する(`env/prod` で、[02-recovery.md](02-recovery.md) の「前提」の認証。実行での確認は未実施)。解除したら、手順 6 からやり直す |
 | キャンセルが、`infra` の `apply` の実行中に届いた | `terraform apply` が途中で止まり、一部のリソースだけが変わった、または state のロックが残った可能性がある | オーナーが、手元で `terraform plan` を読み、state と実体の差を確かめる([02-recovery.md](02-recovery.md) の「前提」)。ロックが残っていれば、他の `apply` が動いていないことを確かめてから解除する(`terraform force-unlock`。実行での確認は未実施)。確かめるまで、`deploy-to-prod` も `apply-to-prod` も起動しない |
-| `deploy` が失敗する | `infra` は成功済み | `gh run view <ID> --log-failed` で原因を読む。直ったら、`main` が進んでいないことを確かめて、`gh run rerun <ID> --failed`(下の説明)。進んでいるときは、新しい SHA で起動し直す |
+| `deploy` が失敗する | `infra` は成功済み | `gh run view <ID> --log-failed` で原因を読む。直ったら、`main` が進んでいないことを確かめて、`gh run rerun <ID> --failed`(下の説明)。進んでいるときは、手順 5 から SHA を取り直し、手順 6(plan のみ)からやり直す |
 
-- 失敗したジョブだけの再実行(`gh run rerun <ID> --failed`)は、元の実行と同じコミット(`github.sha`)で動き、成功済みの `guard` は再実行されない。そのため、`main` が進んでいても検査されず、古い SHA のコミットが prod に出る。再実行の前に、`git fetch origin` のあと `git rev-parse origin/main` が、元の実行で入力した SHA と同じであることを確かめる。違うときは、再実行せず、手順 5 から取り直して起動し直す(新しいコミットを出した実行のあとに、古いコミットの内容を適用して、巻き戻すのを避けるため)
-- 全ジョブの再実行(`gh run rerun <ID>`)は、`guard` も再実行される。入力 `sha` の引き継ぎは未確認([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)。`guard` が失敗したら、新しい SHA で起動し直す
+- 失敗したジョブだけの再実行(`gh run rerun <ID> --failed`)は、元の実行と同じコミット(`github.sha`)で動き、成功済みの `guard` は再実行されない。そのため、`main` が進んでいても検査されず、古い SHA のコミットが prod に出る。再実行の前に、`git fetch origin` のあと `git rev-parse origin/main` が、元の実行で入力した SHA と同じであることを確かめる。違うときは、再実行せず、手順 5 から取り直し、手順 6(plan のみ)からやり直す(新しいコミットを出した実行のあとに、古いコミットの内容を適用して、巻き戻すのを避けるため)
+- 全ジョブの再実行(`gh run rerun <ID>`)は、`guard` も再実行される。入力 `sha` の引き継ぎは未確認([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)。`guard` が失敗したら、手順 5 から SHA を取り直し、手順 6(plan のみ)からやり直す
 - prod を前の状態に戻す専用の手順は、決まっていない(Q23)。問題の変更を取り消す修正を、通常のリリースか、hotfix で出す
 - 復旧のあとの再実行は、[02-recovery.md](02-recovery.md) の「デプロイを再実行する」に従う
 
@@ -244,7 +250,7 @@ git fetch --tags origin
 
 `guard` は、GitHub Actions 上の実行では確かめていない(判定のシェルだけ、ローカルで確かめた)。最初のリリースで、次を確かめる。食い違いがあれば、この手順書と [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」を直す。
 
-1. 古い SHA で、`guard` が失敗すること(prod は変わらない)。リリース PR のマージのあと、手順 5 の前に、マージ前の `main` の先頭を入れて起動する
+1. 古い SHA で、`guard` が失敗すること(prod は変わらない)。リリース PR のマージのあと、**手順 6 の plan のみの実行で計画を読み、意図どおりと確かめてから**、手順 7 の前に、マージ前の `main` の先頭を入れて起動する。`guard` が壊れていると、この起動が通って、最新の `main` が計画を読まずに prod へ反映されるため、計画を読んだあとに行う
 
    ```
    git fetch origin
@@ -254,7 +260,7 @@ git fetch --tags origin
    `origin/main^1` は、マージコミットの第 1 親(マージ前の `main` の先頭)。
 
    - `guard` が「入力 sha ... 一致しない」で失敗し、`qa` 以降が「skipped」になること
-   - 万一 `guard` が通ってしまったら、すぐに実行をキャンセルする(承認を待たないので、`qa` の成功のあとに `infra` が進む。「起動した実行を止める」。`apply` が始まる前に止める)
+   - 万一 `guard` が通ってしまったら、すぐに実行をキャンセルする(承認を待たないので、`qa` の成功のあとに `infra` が進む。「起動した実行を止める」。`apply` が始まる前に止める)。計画は手順 6 で読んでいるので、止めそこなっても、反映されるのは読んだ計画の内容(`main` が進んでいない場合)
    - この失敗した実行を、全ジョブで再実行(`gh run rerun <ID>`)すると、入力 `sha` が引き継がれるかが分かる。引き継がれれば、同じ「一致しない」で失敗する。引き継がれなければ、「40 桁の 16 進ではない」で失敗する(どちらも prod は変わらない)
 2. `main` 以外の ref で、`guard` が失敗すること。この変更が `develop` に入ったあとなら、リリースの前に試せる
 
@@ -264,7 +270,7 @@ git fetch --tags origin
    ```
 
    - `guard` が「起動した ref が refs/heads/main ではない」で失敗し、`qa` 以降が「skipped」になること
-3. 正しい SHA の実際の起動(手順 6 の plan のみの実行と、手順 7)で、`guard` が成功し、`qa` 以降が動くこと
+3. 正しい SHA の実際の起動で、`guard` が成功し、後続のジョブが動くこと。手順 6(`apply-to-prod`)では `guard` のあとに `infra` が動く(`qa` は無い)。手順 7(`deploy-to-prod`)では `guard` のあとに `qa` → `infra` → `deploy` が動く
    - 手順 6 の実行で、`-f apply=false` が効いて、`infra` ジョブが `terraform (plan)` の名前で動き、`apply` のステップが飛ばされること。サマリに「削除を含む変更」と「terraform plan (prod)」が出ること
    - `guard` のステップサマリに、「prod の起動の検査: <SHA> は、いまの main の先頭と一致した」と出ること(`github.token` で `main` の先頭を取得できている)
    - `infra` と `deploy` の `actions/checkout` が取得したコミットが、入力した SHA と同じであること(実行のログで読む)。同じでなければ、`guard` が確かめた SHA と、デプロイされるコミットが違う

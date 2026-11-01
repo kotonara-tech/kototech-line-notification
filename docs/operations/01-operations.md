@@ -114,8 +114,8 @@ git push --force-with-lease --force-if-includes origin <作業ブランチ名>
 1. `develop` から `main` への PR を作る(リリース PR)
 2. `ci` が通ることを確認し、レビューを受ける
 3. **merge commit** で `main` へマージする(`main` と `develop` の履歴を揃え、差分が溜まらないようにする)
-4. マージのあとに、`apply-to-prod` を、最新の `main` の先頭の SHA を入力し、`apply` を false(plan のみ)にして起動する。ステップサマリの「削除を含む変更」と計画を読む
-5. `deploy-to-prod` を手動で起動する。4 と同じ SHA を入力する(一致しないと、最初のジョブ `guard` が失敗して、何も動かない)。**Environment `prod` の承認は待たない**(D36)ので、`guard` と `qa` が通ると、そのまま prod へデプロイされる。止めたいときは、`apply` が始まる前に、実行をキャンセルする([03-release.md](03-release.md) の「起動した実行を止める」)
+4. マージのあとに、`apply-to-prod` を、最新の `main` の先頭の SHA を入力し、`apply` を false(plan のみ)にして起動する。起動の直後に、ジョブ名が `terraform (plan)` であることを確かめる(`terraform (plan / apply)` なら、`apply` の付け忘れ。すぐにキャンセルする)。ステップサマリの「削除を含む変更」と計画を読む
+5. `deploy-to-prod` を手動で起動する。4 と同じ SHA を入力する(一致しないと、最初のジョブ `guard` が失敗して、何も動かない)。**Environment `prod` の承認は待たない**(D36)ので、`guard` と `qa` が通ると、そのまま prod へデプロイされる。止めたいときは、`apply` が始まる前に、実行をキャンセルする。実行中の画面で `plan` を読んでから止めることは当てにしない(計画の確認は、手順 4 で済ませる。[03-release.md](03-release.md) の「起動した実行を止める」)
 6. デプロイ後、prod の動作を確認する
 7. `main` のマージコミットにバージョンタグを付け、リリースノートを書く(下記「リリースとバージョニング」)
 
