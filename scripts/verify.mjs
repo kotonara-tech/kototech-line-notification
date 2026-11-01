@@ -90,7 +90,7 @@ function splitJobs(text) {
   const jobs = {};
   let current = null;
   for (const line of lines.slice(start + 1)) {
-    const m = line.match(/^  ([A-Za-z0-9_-]+):\s*$/);
+    const m = line.match(/^  ["']?([A-Za-z0-9_-]+)["']?:\s*(#.*)?$/); // `id:`・`id: # コメント`・`"id":`
     if (m) {
       current = m[1];
       jobs[current] = "";
@@ -98,6 +98,23 @@ function splitJobs(text) {
   }
   return jobs;
 }
+
+// ジョブ直下(インデント 4)の key: の値。同じ行の値と、続く深いインデントの行を、コメントを除いて返す。key がなければ null
+function jobField(block, key) {
+  const lines = block.split("\n");
+  const i = lines.findIndex((l) => new RegExp(`^ {4}${key}:`).test(l));
+  if (i < 0) return null;
+  const value = [lines[i].slice(5 + key.length)];
+  for (const l of lines.slice(i + 1)) {
+    if (l.trim() && !l.trim().startsWith("#") && !/^( {5}| {4}-\s)/.test(l)) break;
+    value.push(l);
+  }
+  return value.map((l) => l.replace(/(^|\s)#.*$/, "")).join("\n");
+}
+// ジョブの needs。書き方は 3 通り: `needs: a` / `needs: [a, b]`(複数行も可)/ 行ごとの `- a`
+const jobNeeds = (block) =>
+  (jobField(block, "needs") ?? "").replace(/^\s*-\s+/gm, "").replace(/[[\],"']/g, " ").split(/\s+/).filter(Boolean);
+
 const allJobs = Object.entries(workflows).flatMap(([file, text]) => Object.entries(splitJobs(text)).map(([id, block]) => ({ file, id, block, text })));
 
 check(
@@ -138,13 +155,8 @@ check(
   "needs が、存在するジョブを指す",
   allJobs.flatMap(({ file, id, block, text }) => {
     const ids = Object.keys(splitJobs(text));
-    const m = block.match(/^\s+needs:\s*(.+)$/m);
-    if (!m) return [];
-    return m[1]
-      .replace(/[\[\]]/g, "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter((n) => n && !ids.includes(n))
+    return jobNeeds(block)
+      .filter((n) => !ids.includes(n))
       .map((n) => `${file}: job ${id} の needs ${n} が存在しない`);
   }),
 );
@@ -203,6 +215,7 @@ check(
 // ---------------------------------------------------------------- prod 系 workflow の前提
 // 承認を挟まない運用では、「手動起動のみ」「sha の入力が必須」「最初のジョブ guard が検査」が、prod を守る主な仕組みになる。
 // 壊す変更(push トリガーの復活、guard の削除、sha を任意にする、など)を機械で止める。guard の中身(main の先頭との比較)は見ない。
+// 正規表現による検査のため、`run: |` など複数行の文字列の中身は、YAML のキーと区別しない。
 // 正本は docs/engineering/02-infra.md の「CD」。
 const PROD = ["deploy-to-prod.yml", "apply-to-prod.yml"];
 const ON = `["']?on["']?`;
@@ -232,21 +245,12 @@ function triggers(text) {
   return items(lines.filter((l) => l.match(/^\s*/)[0].length === base));
 }
 
-// ジョブの needs。書き方は 3 通り: `needs: a` / `needs: [a, b]`(複数行も可)/ 行ごとの `- a`
-function jobNeeds(block) {
-  const flow = block.match(/^ {4}needs:\s*\[([^\]]*)\]/m)?.[1];
-  if (flow != null) return items(flow.replace(/#.*$/gm, "").split(","));
-  const scalar = block.match(/^ {4}needs:[ \t]*([^#\s][^#\n]*)/m)?.[1];
-  if (scalar) return items([scalar]);
-  const lines = block.split("\n");
-  const i = lines.findIndex((l) => /^ {4}needs:\s*(#.*)?$/.test(l));
-  if (i < 0) return [];
-  const list = [];
-  for (const l of lines.slice(i + 1)) {
-    if (/^ {4,}-\s/.test(l)) list.push(l);
-    else if (l.trim() && !l.trim().startsWith("#")) break;
-  }
-  return items(list);
+// guard ジョブの、check-main-sha を使うステップ(steps: の下の、`- ` で始まる 1 ステップ分)。なければ undefined
+function guardStep(guard) {
+  const steps = nested(guard, "steps") ?? "";
+  const dash = steps.match(/^( *)-\s/m)?.[1] ?? "";
+  const uses = /^\s*(-\s+)?uses:\s*["']?\.\/\.github\/actions\/check-main-sha\/?["']?\s*(#.*)?$/m;
+  return steps.split(new RegExp(`^(?=${dash}-\\s)`, "m")).find((s) => uses.test(s));
 }
 
 check(
@@ -301,9 +305,26 @@ check(
   "prod 系 workflow の guard が、check-main-sha に sha: inputs.sha を渡す",
   prod.flatMap(({ file, jobs }) => {
     if (!jobs.guard) return [`${file}: guard ジョブがない`];
-    const step = jobs.guard.split(/^(?= {4,}-\s)/m).find((s) => /^\s*(-\s+)?uses:\s*["']?\.\/\.github\/actions\/check-main-sha["']?\s*(#.*)?$/m.test(s));
+    const step = guardStep(jobs.guard);
     if (!step) return [`${file}: guard が ./.github/actions/check-main-sha を uses で使っていない`];
-    return /^\s*sha:\s*["']?\$\{\{\s*inputs\.sha\s*\}\}["']?\s*(#.*)?$/m.test(nested(step, "with") ?? "") ? [] : [`${file}: guard の check-main-sha に、with の sha: \${{ inputs.sha }} を渡していない`];
+    const sha = /^\s*sha:\s*["']?\$\{\{\s*inputs\.sha\s*\}\}["']?\s*(#.*)?$/m;
+    return sha.test(nested(step, "with") ?? "") ? [] : [`${file}: guard の check-main-sha に、with の sha: \${{ inputs.sha }} を渡していない`];
+  }),
+);
+
+// guard が失敗しても、続くジョブが動く書き方(guard の if / continue-on-error、ほかのジョブの if: always() など)
+check(
+  "prod 系 workflow の guard が、スキップ・失敗の無視をされず、guard が失敗しても動く条件(always() など)のジョブがない",
+  prod.flatMap(({ file, jobs }) => {
+    if (!jobs.guard) return [];
+    const jobLevel = ["if", "continue-on-error"].filter((k) => jobField(jobs.guard, k) != null);
+    const stepLevel = /^\s*(-\s+)?(if|continue-on-error):/m.test(guardStep(jobs.guard) ?? "");
+    const others = Object.entries(jobs).filter(([id, block]) => id !== "guard" && /\b(always|cancelled|failure)\s*\(/.test(jobField(block, "if") ?? ""));
+    return [
+      ...jobLevel.map((k) => `${file}: guard ジョブに ${k}: がある(guard がスキップされる、または失敗しても続く)`),
+      ...(stepLevel ? [`${file}: guard の check-main-sha のステップに if: か continue-on-error: がある`] : []),
+      ...others.map(([id]) => `${file}: job ${id} の if に always()・cancelled()・failure() がある(guard が失敗しても動く)`),
+    ];
   }),
 );
 

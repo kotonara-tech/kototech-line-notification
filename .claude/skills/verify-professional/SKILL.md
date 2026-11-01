@@ -58,7 +58,7 @@ make verify
 | --- | --- |
 | ドキュメント | 相対リンクが存在する / 参照する `Q` `D` の番号が `00-openquestion.md` にある / 廃止した用語(`TASK`、`LINE_CHANNEL_ACCESS_TOKEN` など)が残っていない / `docs/README.md` が 100 行以内 |
 | yml | タブ文字がない / 呼ぶ reusable workflow が存在する / 呼ぶローカル action(`uses: ./.github/actions/*`)に `action.yml` がある / **呼び出し先が `id-token: write` を要求するとき、呼び出し側も許可している** / `needs` が存在するジョブを指す / **`working-directory` があるジョブで、`checkout` より前に `run` していない** / 使う `vars.*` が `02-infra.md` の表にある / `terraform apply` するワークフローが必須の変数を `TF_VAR_*` で渡す / `apply` を `cancel-in-progress: true` で中断しない |
-| prod 系 workflow(`deploy-to-prod.yml`・`apply-to-prod.yml`) | `workflow_dispatch` だけで起動する(`push`・`schedule` などの自動トリガーがない) / 入力 `sha` が `required: true`・`type: string` / 最初のジョブが `guard` で、ほかのすべてのジョブが `needs` で(間接でもよい)`guard` を待つ / `guard` が `./.github/actions/check-main-sha` に `sha: ${{ inputs.sha }}` を渡す。`guard` の中身(`main` の先頭との比較)は見ない |
+| prod 系 workflow(`deploy-to-prod.yml`・`apply-to-prod.yml`) | `workflow_dispatch` だけで起動する(`push`・`schedule` などの自動トリガーがない) / 入力 `sha` が `required: true`・`type: string` / 最初のジョブが `guard` で、ほかのすべてのジョブが `needs` で(間接でもよい)`guard` を待つ / `guard` が `./.github/actions/check-main-sha` に `sha: ${{ inputs.sha }}` を渡す / `guard` のジョブと `check-main-sha` のステップに `if:`・`continue-on-error:` がなく、ほかのジョブの `if:` に `always()`・`cancelled()`・`failure()` がない。`guard` の中身(`main` の先頭との比較)は見ない。`run: |` など複数行の文字列の中身は、YAML のキーと区別しない |
 
 ## GitHub Actions の論理検証
 
