@@ -48,6 +48,7 @@ jobs:
       id-token: write
     with:
       environment: prod
+      check_release_source: true
 
   deploy:
     needs: infra

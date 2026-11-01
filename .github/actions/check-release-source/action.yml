@@ -1,0 +1,44 @@
+name: check-release-source
+description: main に入る(入った)コミットが、develop で検証済みのものかを検査する。満たさないとき、または develop との関係を取得できないときは、失敗する(通さない)
+
+# 背景: develop で検証されていないコミットが、main(= prod)に入らないようにする。develop → main の流れを、手順書だけでなく CI でも担保する。
+# 呼び出し元は、2 か所(判定の中身は check.sh と、docs/operations/01-operations.md の「リリース元の検査」)。
+#   - check-release-source.yml: main 宛ての PR。mode: pull_request。PR の head の先頭が、develop の先頭と同一かを見る
+#   - reusable-infra-deploy.yml: prod のデプロイ。mode: deploy。デプロイするコミットが、develop の履歴に含まれる内容だけかを見る
+# 呼び出し側は、actions/checkout の直後に呼ぶ(ローカル action は、リポジトリの取得後でないと見つからない)。
+#   - uses: ./.github/actions/check-release-source
+#     with:
+#       mode: pull_request
+#       sha: ${{ github.event.pull_request.head.sha }}
+#       token: ${{ github.token }}
+# 必要な権限は、contents: read だけ(GitHub の API で、develop の先頭と、コミットの関係を読む)。
+
+inputs:
+  mode:
+    description: pull_request(main 宛ての PR の検査)か、deploy(prod のデプロイの検査)
+    required: true
+  sha:
+    description: 検査するコミット。pull_request は PR の head(github.event.pull_request.head.sha)、deploy はデプロイするコミット(github.sha)
+    required: true
+  head-ref:
+    description: mode が pull_request のとき、PR の head のブランチ名。同じリポジトリのブランチのときだけ渡す(fork のときは空)。hotfix/* は検査の対象外になる
+    required: false
+    default: ''
+  token:
+    description: GitHub の API を読むトークン。呼び出し側が github.token を渡す(contents の read 権限で足りる)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: マージ元(デプロイするコミット)が develop で検証済みかを検査する
+      shell: bash
+      env:
+        # 式の値は、シェルのコマンドに直接埋め込まず、環境変数で渡す(インジェクションを避ける)。
+        # ブランチ名などの人が書ける値も、check.sh は変数として読むだけで、コマンドとして実行しない
+        MODE: ${{ inputs.mode }}
+        SHA: ${{ inputs.sha }}
+        HEAD_REF: ${{ inputs.head-ref }}
+        GH_TOKEN: ${{ inputs.token }}
+      # リポジトリ名は、ランナーが設定する GITHUB_REPOSITORY を check.sh が読む。action のディレクトリは GITHUB_ACTION_PATH(composite action のみ)
+      run: bash "$GITHUB_ACTION_PATH/check.sh"
