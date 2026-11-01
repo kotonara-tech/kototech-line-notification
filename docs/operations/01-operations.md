@@ -121,6 +121,7 @@ git push --force-with-lease --force-if-includes origin <作業ブランチ名>
 
 - リリース PR のマージ(`main` への push)で起動するのは `deploy-to-prod` だけで、`deploy-to-dev` は起動しない(`develop` が変わらないため)
 - マージ直後の `main` と `develop` は、内容が同じ(`main` に増えるのは、マージコミットだけ)。リリースのあとに、`main` を `develop` へ反映する必要はない
+- コマンドと確認を含む手順書は、[03-release.md](03-release.md) にある
 
 ## リリースとバージョニング
 
