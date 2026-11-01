@@ -200,5 +200,112 @@ check(
     .map(([f]) => `${f}: apply が途中で中断されうる`),
 );
 
+// ---------------------------------------------------------------- prod 系 workflow の前提
+// 承認を挟まない運用では、「手動起動のみ」「sha の入力が必須」「最初のジョブ guard が検査」が、prod を守る主な仕組みになる。
+// 壊す変更(push トリガーの復活、guard の削除、sha を任意にする、など)を機械で止める。guard の中身(main の先頭との比較)は見ない。
+// 正本は docs/engineering/02-infra.md の「CD」。
+const PROD = ["deploy-to-prod.yml", "apply-to-prod.yml"];
+const ON = `["']?on["']?`;
+
+// key: の下のブロック(key より深いインデントの行。空行とコメントは範囲に含める)。key がなければ null、値が同じ行にあれば空
+function nested(text, key) {
+  if (text == null) return null;
+  const lines = text.split("\n");
+  const i = lines.findIndex((l) => new RegExp(`^\\s*${key}:\\s*(#.*)?$`).test(l));
+  if (i < 0) return null;
+  const indent = lines[i].match(/^\s*/)[0].length;
+  const body = [];
+  for (const l of lines.slice(i + 1)) {
+    if (l.trim() !== "" && !l.trim().startsWith("#") && l.match(/^\s*/)[0].length <= indent) break;
+    body.push(l);
+  }
+  return body.join("\n");
+}
+const items = (lines) => lines.map((s) => s.replace(/#.*$/, "").trim().replace(/^-\s*/, "").replace(/:.*$/, "").replace(/^["']|["']$/g, "")).filter(Boolean);
+
+// on のトリガー名。書き方は 3 通り: `on: push` / `on: [push, pull_request]` / `on:` の下のキー(`- push` の行でもよい)
+function triggers(text) {
+  const inline = text.match(new RegExp(`^${ON}:[ \\t]*([^#\\s][^#\\n]*)`, "m"))?.[1];
+  if (inline) return items(inline.replace(/[[\]{}]/g, "").split(","));
+  const lines = (nested(text, ON) ?? "").split("\n").filter((l) => l.trim() && !l.trim().startsWith("#"));
+  const base = lines[0]?.match(/^\s*/)[0].length;
+  return items(lines.filter((l) => l.match(/^\s*/)[0].length === base));
+}
+
+// ジョブの needs。書き方は 3 通り: `needs: a` / `needs: [a, b]`(複数行も可)/ 行ごとの `- a`
+function jobNeeds(block) {
+  const flow = block.match(/^ {4}needs:\s*\[([^\]]*)\]/m)?.[1];
+  if (flow != null) return items(flow.replace(/#.*$/gm, "").split(","));
+  const scalar = block.match(/^ {4}needs:[ \t]*([^#\s][^#\n]*)/m)?.[1];
+  if (scalar) return items([scalar]);
+  const lines = block.split("\n");
+  const i = lines.findIndex((l) => /^ {4}needs:\s*(#.*)?$/.test(l));
+  if (i < 0) return [];
+  const list = [];
+  for (const l of lines.slice(i + 1)) {
+    if (/^ {4,}-\s/.test(l)) list.push(l);
+    else if (l.trim() && !l.trim().startsWith("#")) break;
+  }
+  return items(list);
+}
+
+check(
+  "prod 系 workflow(deploy-to-prod.yml・apply-to-prod.yml)がある",
+  PROD.filter((f) => !workflows[f]).map((f) => `${f}: ファイルがない(名前を変えたときは、verify.mjs の PROD も直す)`),
+);
+const prod = PROD.filter((f) => workflows[f]).map((file) => ({ file, text: workflows[file], jobs: splitJobs(workflows[file]) }));
+
+check(
+  "prod 系 workflow が、workflow_dispatch だけで起動する(push・schedule などの自動トリガーがない)",
+  prod.flatMap(({ file, text }) => {
+    const names = triggers(text);
+    const extra = names.filter((n) => n !== "workflow_dispatch");
+    return [
+      ...(names.includes("workflow_dispatch") ? [] : [`${file}: on に workflow_dispatch がない`]),
+      ...(extra.length ? [`${file}: on に workflow_dispatch 以外のトリガーがある(${extra.join(", ")})`] : []),
+    ];
+  }),
+);
+
+check(
+  "prod 系 workflow の入力 sha が、required: true・type: string",
+  prod.flatMap(({ file, text }) => {
+    const sha = [ON, "workflow_dispatch", "inputs", "sha"].reduce((t, k) => nested(t, k), text);
+    if (!sha) return [`${file}: on.workflow_dispatch.inputs.sha がない`];
+    return [
+      ...(/^\s*required:\s*true\s*(#.*)?$/m.test(sha) ? [] : [`${file}: inputs.sha が required: true ではない`]),
+      ...(/^\s*type:\s*["']?string["']?\s*(#.*)?$/m.test(sha) ? [] : [`${file}: inputs.sha の type が string ではない`]),
+    ];
+  }),
+);
+
+// guard の失敗は、続くジョブをスキップさせる。guard を待たないジョブは、guard が失敗しても動く
+check(
+  "prod 系 workflow の最初のジョブが guard で、ほかのすべてのジョブが guard を待つ(needs。間接でもよい)",
+  prod.flatMap(({ file, jobs }) => {
+    const ids = Object.keys(jobs);
+    if (!ids.includes("guard")) return [`${file}: guard ジョブがない`];
+    const waits = (id, seen = new Set()) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return jobNeeds(jobs[id] ?? "").some((n) => n === "guard" || waits(n, seen));
+    };
+    return [
+      ...(ids[0] === "guard" ? [] : [`${file}: 最初のジョブが guard ではない(${ids[0]})`]),
+      ...ids.filter((id) => id !== "guard" && !waits(id)).map((id) => `${file}: job ${id} が guard を待たない(needs をたどっても guard に届かない)`),
+    ];
+  }),
+);
+
+check(
+  "prod 系 workflow の guard が、check-main-sha に sha: inputs.sha を渡す",
+  prod.flatMap(({ file, jobs }) => {
+    if (!jobs.guard) return [`${file}: guard ジョブがない`];
+    const step = jobs.guard.split(/^(?= {4,}-\s)/m).find((s) => /^\s*(-\s+)?uses:\s*["']?\.\/\.github\/actions\/check-main-sha["']?\s*(#.*)?$/m.test(s));
+    if (!step) return [`${file}: guard が ./.github/actions/check-main-sha を uses で使っていない`];
+    return /^\s*sha:\s*["']?\$\{\{\s*inputs\.sha\s*\}\}["']?\s*(#.*)?$/m.test(nested(step, "with") ?? "") ? [] : [`${file}: guard の check-main-sha に、with の sha: \${{ inputs.sha }} を渡していない`];
+  }),
+);
+
 console.log(failures ? `\n失敗 ${failures} 件` : "\nすべて通った");
 process.exit(failures ? 1 : 0);
