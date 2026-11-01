@@ -12,7 +12,7 @@
 - `infra/terraform/` インフラ (`bootstrap` / `env/{dev,prod}` / `modules`)
 - `docs/infra/` インフラ構成図
 - `scripts/verify.mjs` ドキュメントと GitHub Actions(yml)の簡単な検査(`make verify` から呼ばれる)
-- `.claude/skills/` 開発用スキル: `go-professional`(backend の Go)、`infra-professional`(Terraform / GCP)、`docs-professional`(ドキュメント)、`verify-professional`(完了前の検証)。該当する作業の前に参照する
+- `.claude/skills/` 開発用スキル: `go-professional`(backend の Go)、`infra-professional`(Terraform / GCP)、`docs-professional`(ドキュメント)、`verify-professional`(完了前の検証)、`issue-professional`(Issue を作る・直す・ボードに載せる)。該当する作業の前に参照する
 
 ## 方針
 
