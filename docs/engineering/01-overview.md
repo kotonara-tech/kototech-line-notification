@@ -32,7 +32,7 @@ Cloud Run は **Job** として使う。HTTP エンドポイントを持たず�
 
 | 要素 | 役割 |
 | --- | --- |
-| Cloud Scheduler | 毎分、Cloud Run Job を起動する(Scheduler のジョブは 1 つ。無料枠内) |
+| Cloud Scheduler | 5 分ごとに、Cloud Run Job を起動する(Scheduler のジョブは 1 つ。無料枠内) |
 | Cloud Run Job (Go, `backend/`) | 工程表を読み、開始間近のプログラムを判定し、LINE へ送信し、通知済みを工程表へ記録する |
 | Secret Manager | LINE チャネルシークレット等の秘匿情報(アクセストークンは保管せず、アプリが実行のたびに発行する) |
 | Sheets API | 工程表の読み書き |
@@ -40,7 +40,7 @@ Cloud Run は **Job** として使う。HTTP エンドポイントを持たず�
 
 ```mermaid
 flowchart LR
-    Sched[Cloud Scheduler<br/>毎分] -->|Jobs API :run| Run[Cloud Run Job<br/>Go]
+    Sched[Cloud Scheduler<br/>5 分ごと] -->|Jobs API :run| Run[Cloud Run Job<br/>Go]
     Run -->|シークレット取得| SM[Secret Manager]
     Run -->|工程表の読み書き| Sheet[(スプレッドシート)]
     Run -->|Messaging API| LINE[LINE]
@@ -69,7 +69,7 @@ flowchart LR
 | 項目 | 内容 |
 | --- | --- |
 | 機能 | 工程表を読み、**現在時刻から n 分以内に始まるプログラム**を検出し、「まもなく開始します」旨の通知を、LINE の **broadcast(全友だちへ一斉配信)**で送信する。文面のテンプレートは固定で、イベント名・プログラム名・開始時刻・場所を差し込む |
-| 起動 | Cloud Scheduler が毎分、Cloud Run Job を起動する(エンドポイントなし) |
+| 起動 | Cloud Scheduler が 5 分ごとに、Cloud Run Job を起動する(エンドポイントなし) |
 | バイナリ | ビルドする Go バイナリは 1 つ。環境変数 `ROLE`(`scan` / 将来 `api`)で役割を切り替える。将来の API 追加にも同じコードベースで対応する |
 | 判定 | 「ちょうど n 分前」ではなく「開始まで n 分以内で、未通知」で判定する。起動のずれや 1 回の取りこぼしを次回で吸収する |
 | 重複防止 | 通知済みを工程表に記録し、同じプログラムへ二重送信しない(冪等にする) |

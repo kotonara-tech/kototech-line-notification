@@ -36,7 +36,7 @@ variable "timeout" {
 }
 
 variable "max_retries" {
-  description = "失敗時の再試行回数。毎分実行なので既定は 0(次回の実行で拾う)"
+  description = "失敗時の再試行回数。定期実行なので既定は 0(次回の実行で拾う)"
   type        = number
   default     = 0
 }
