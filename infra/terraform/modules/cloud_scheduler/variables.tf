@@ -17,9 +17,9 @@ variable "description" {
 }
 
 variable "schedule" {
-  description = "cron 式。既定は毎分"
+  description = "cron 式。既定は 5 分ごと。Cloud Run の Job は最低 1 分が課金されるため、間隔を短くすると費用が増える"
   type        = string
-  default     = "* * * * *"
+  default     = "*/5 * * * *"
 }
 
 variable "time_zone" {

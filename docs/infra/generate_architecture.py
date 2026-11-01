@@ -232,7 +232,7 @@ paste_icon(sheets_icon(), *SHEETS)
 icon_label(*SHEETS, ["Google スプレッドシート", "工程表"])
 
 paste_icon(load_png("cloud_scheduler"), *SCHEDULER)
-icon_label(*SCHEDULER, ["Cloud Scheduler", "毎分・Scheduler用SA"])
+icon_label(*SCHEDULER, ["Cloud Scheduler", "5分ごと・Scheduler用SA"])
 
 paste_icon(load_png("cloud_run"), *JOB)
 icon_label(*JOB, ["Cloud Run Job (Go)", "ROLE=scan・実行用SA"])
@@ -270,7 +270,7 @@ arrow([(OPERATOR[0] + 70, OPERATOR[1]), (1080, OPERATOR[1]), (SHEETS[0] - half -
       "工程表を編集(共有設定で権限管理)", (700, OPERATOR[1]))
 
 arrow([(SCHEDULER[0] + half + 6, JOB[1]), (JOB[0] - half - 8, JOB[1])],
-      "毎分起動\nJobs API :run\n(OAuth)", ((SCHEDULER[0] + JOB[0]) / 2, JOB[1]))
+      "5分ごと起動\nJobs API :run\n(OAuth)", ((SCHEDULER[0] + JOB[0]) / 2, JOB[1]))
 
 arrow([(JOB[0], JOB[1] - half - 6), (SHEETS[0], 318)],
       "読み取り / 通知済みを書き込み\n(Sheets API)", (JOB[0], 440), both=True)

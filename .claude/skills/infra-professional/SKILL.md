@@ -104,10 +104,10 @@ infra/terraform/
 
 ### Cloud Run Job と Scheduler
 
-- 処理は Cloud Run **Job**(HTTP エンドポイントなし)。Scheduler が毎分 **Cloud Run Jobs API の `:run`** を呼ぶ
+- 処理は Cloud Run **Job**(HTTP エンドポイントなし)。Scheduler が 5 分ごとに **Cloud Run Jobs API の `:run`** を呼ぶ
 - 呼び出し先が Google の API なので、Scheduler は **OAuth トークン**(`oauth_token`、スコープ `cloud-platform`)を使う。OIDC は、自前の HTTP エンドポイントを呼ぶときの方式(使い分けを間違えない)
 - Scheduler 用 SA には、**対象の Job への `roles/run.invoker` だけ**を付ける
-- 再試行は 0(毎分実行なので次回で拾う)。実行が重なりうるため、冪等性はアプリ側で担保する
+- 再試行は 0(定期実行なので次回で拾う)。実行が重なりうるため、冪等性はアプリ側で担保する
 - 初回デプロイ前は Job のイメージが placeholder のため、Scheduler を停止しておく(`scheduler_paused`)
 - イメージは Terraform で管理しない(`ignore_changes`)。CD が `gcloud run jobs update` で更新する。環境変数と Secret は Terraform が管理する
 

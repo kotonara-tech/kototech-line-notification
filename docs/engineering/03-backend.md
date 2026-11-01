@@ -330,4 +330,4 @@ backend/
 
 ## 未決
 
-[00-openquestion.md](00-openquestion.md) の Q6〜Q9、Q11、Q14、Q17 に依存する。
+[00-openquestion.md](00-openquestion.md) の Q7〜Q9、Q11、Q14、Q17 に依存する。

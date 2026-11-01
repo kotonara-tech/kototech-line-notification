@@ -16,7 +16,7 @@
 ## 概要
 
 - 工程表(スプレッドシート)に合わせて、LINE Messaging API 経由で通知する
-- 構成: Cloud Scheduler(毎分) → Cloud Run Job(Go) → Sheets API / LINE。GAS は使わない
+- 構成: Cloud Scheduler(5 分ごと) → Cloud Run Job(Go) → Sheets API / LINE。GAS は使わない
 - 配信メッセージは、MVP ではテキストメッセージの broadcast(文面のテンプレートは固定)。Flex Message 化は今後の候補で、`docs/mocks/` で設計してから行う
 - 詳細な設計は [docs/](docs/README.md) を参照
 

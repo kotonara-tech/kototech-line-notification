@@ -6,11 +6,10 @@
 
 | ID | 質問 | 備考 |
 | --- | --- | --- |
-| Q6 | 許容する通知時刻のずれ(何秒・何分以内) | Job は毎回コンテナが起動するため、数秒の起動遅延がある |
 | Q7 | 実行履歴・エラーの記録先と、失敗時の検知・通知方法 | Cloud Logging / アラート など |
 | Q8 | LINE 公式アカウントのプランと月間メッセージ数の上限 | broadcast は友だち数 × 配信回数で消費される。1 プログラム 1 回の配信でも、友だち数が増えると上限に近づく |
 | Q9 | Webhook の要否。必要な場合、HTTP サービスを別に追加するか | broadcast なら友だちのユーザー ID の収集は不要。返信などの双方向機能を持たせる場合のみ。受ける場合は署名検証が必要で、未認証公開になる |
-| Q11 | Job の実行が重なった場合の排他 | 前回の実行が長引くと次の分の実行と重なる。冪等性で防ぐか、排他を入れるか |
+| Q11 | Job の実行が重なった場合の排他 | 前回の実行が長引くと次の実行と重なる。冪等性で防ぐか、排他を入れるか |
 | Q14 | dev / prod 用のテストスプレッドシート・LINE チャネル(チャネル ID・チャネルシークレット)の用意 | 環境は分ける(D8) |
 | Q17 | 失敗時のアラート(Cloud Monitoring)の要否と通知先 | Q7 と関連 |
 | Q20 | Environment `prod` の承認者(Required reviewers)を設定するか。設定するなら誰か。しないなら、ドキュメントの「承認あり」を直すか | 2026-11-01 に `gh api` で確かめたところ、`prod` も `dev` も `protection_rules` が空(`deployment_branch_policy` は `null`)。D16・D22、[01-operations.md](../operations/01-operations.md)、[02-infra.md](02-infra.md) の「CD」は、承認ありを前提にしている。未設定のままだと、リリース PR のマージの直後に、承認なしで prod へ反映される。D18(PR の Approve)と関連。[03-release.md](../operations/03-release.md) |
@@ -27,14 +26,14 @@
 | D2 | スプレッドシートの権限管理は、サービスアカウントを共有先に追加して行う | Google の権限階層をそのまま利用する要件 |
 | D3 | API Gateway 相当のサービスは使わない | エンドポイントを持たないため不要(旧: Cloud Run 標準 URL + IAM) |
 | D4 | サービスアカウントは Scheduler 用と Job 実行用に分ける | 最小権限 |
-| D5 | Scheduler のジョブは 1 つ(毎分) | 無料枠(3 ジョブ)内 |
+| D5 | Scheduler のジョブは 1 つ(5 分ごと。旧: 毎分) | 無料枠(3 ジョブ)内。起動間隔は D35 |
 | D6 | 判定は「開始まで n 分以内かつ未通知」とし、ちょうど n 分前には依存しない | 起動のずれ・取りこぼしの吸収 |
 | D7 | インフラは Terraform で管理し、構成は `bootstrap/` `env/{dev,prod}` `modules/` とする | 環境差分とモジュールの再利用 |
 | D8 | 環境は dev / prod の 2 つに分け、それぞれ別の GCP プロジェクトにする | リソース名の衝突回避と本番の保護 |
 | D9 | tfstate は ops プロジェクトの GCS バケット(bootstrap で作成)に、環境ごとの prefix で保管する | dev / prod のどちらを消しても state が失われない |
 | D10 | CD は GitHub Actions + Workload Identity Federation(鍵なし)。prod は `main` のみ許可する | 鍵の漏洩リスク排除 |
 | D11 | Job のイメージは Artifact Registry に置き、Terraform は差分を無視して CD が更新する | インフラとアプリのデプロイ責務の分離 |
-| D12 | バックエンドは Go。Cloud Run は **Job** として使い、HTTP エンドポイントは持たない。Scheduler が Jobs API で毎分起動する | 純粋なコンピュート業務(03-backend.md) |
+| D12 | バックエンドは Go。Cloud Run は **Job** として使い、HTTP エンドポイントは持たない。Scheduler が Jobs API で 5 分ごとに起動する(旧: 毎分。D35) | 純粋なコンピュート業務(03-backend.md) |
 | D13 | ビルドする Go バイナリ・イメージは 1 つ。切り替えは環境変数 `ROLE` に一本化し、Job でも使う(`scan` / 将来 `api`) | 配布物の一本化。将来 API を同じコードベースで追加するため |
 | D14 | MVP は Scheduler → Cloud Run Job → Sheets API / LINE の構成とする | 旧 GAS 案を廃止(D1) |
 | D15 | GCP プロジェクトは ops / dev / prod の 3 つに分ける。ops には state バケットのみ置く | AWS のアカウント分割に相当。VPC は使わない |
@@ -57,3 +56,4 @@
 | D32 | 通知の文面は、Go のファイルの中の `text/template`(`infrastructure/line/template`、種類ごとに 1 ファイル)で作り、LINE に送る側(`infrastructure/line`)が、ドメインの `notice`(種類・元のプログラム・キー)を受け取って描画する。**通常はドメインに置く文面を、意図的に外へ出す** | 複数のテンプレートメッセージ(text・Flex など、送る形式が違うもの)を使うため。文面と LINE の形式はセットで変わり、ドメインに置くと形式の事情が入り込む。依存の向きは infrastructure → domain のまま |
 | D33 | マージ方法を Ruleset でブランチごとに固定する: `develop` 宛て(作業ブランチからの PR)は**スカッシュのみ**、`main` 宛て(リリース PR)は**マージコミットのみ**。Ruleset でマージ方法を指定するには、PR 必須を同時に有効にする必要があるため、**フェーズ 2 に移行**し、`develop` と `main` への直 push を止めた。承認数は 0(必須ステータスチェックと、他の人の Approve は、メンバーが揃ってから) | スカッシュで作業中のコミットをまとめつつ、リリース PR はマージコミットにして、`main` と `develop` の履歴がずれないようにする |
 | D34 | Issue・PR・ブランチの書き方を決める: ① Issue・PR のタイトルは、`【INFRA】【BE】【DOCS】【CORE】` のいずれかで始める ② 作業ブランチは `<種類>/<Issue番号>-<短い説明>` ③ PR は、先頭の `Closes #` で、必ず Issue と関連付ける ④ **1 PR で閉じるのは 1 Issue まで**(関わるだけなら `Ref #`) ⑤ PR の Milestone は、閉じる Issue と同じにする(Issue に無ければ、先に Issue に付ける) ⑥ PR の担当者は、作成者自身にする ⑦ レビュアーは、自動ではリクエストしない(`gh pr create` に `--reviewer` を付けない。人が必要なときに指定する) | 一覧から、領域と、どの Issue の作業かを分かるようにする。1 つの PR が複数の Issue を閉じると、変更の目的が混ざる。Milestone を Issue と揃えると、Issue と PR を同じ単位で追える。レビューをリクエストすると相手に通知が飛ぶため、自動では行わない |
+| D35 | Scheduler の起動間隔は **5 分ごと**(`*/5 * * * *`、Asia/Tokyo)とする。通知は、開始の(`NOTIFY_LEAD_MINUTES` − 5)分前〜`NOTIFY_LEAD_MINUTES` 分前の間に届く(既定の 10 分なら 5〜10 分前)。許容する通知時刻のずれは、起動間隔(5 分)までとする(旧 Q6)。`NOTIFY_LEAD_MINUTES` は 5 以上にする | Cloud Run の Job は最低 1 分が課金されるため、毎分の起動は prod のみで月約 $44 かかる(目安)。5 分ごとなら約 $5(1 vCPU / 512 MiB、東京リージョン、30 日の月、無料枠は請求先アカウントで共有。公式の料金ページで 2026-11-01 に確認した。料金は変わりうるので、公式で再確認する)。D6 により、間隔を延ばしても通知を取りこぼさない |

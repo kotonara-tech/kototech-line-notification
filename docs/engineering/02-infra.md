@@ -99,15 +99,16 @@ infra/terraform/
 - HTTP エンドポイントを持たない。Scheduler に起動され、処理して終了する純粋なコンピュート
 - イメージ(Go バイナリ)は 1 つ。役割は環境変数 `ROLE` で切り替える(`scan` の Job は `ROLE=scan`。[03-backend.md](03-backend.md))。役割を増やす場合は、同じイメージを使う Job を追加する
 - 将来 API を追加する場合は、同じイメージを `ROLE=api` で動かす Cloud Run Service のモジュールを追加する
-- タイムアウトは 300 秒、再試行は 0(毎分実行のため、次回の実行で拾う)。1 回の実行は 1 タスク
+- タイムアウトは 300 秒、再試行は 0(定期実行のため、次回の実行で拾う)。1 回の実行は 1 タスク
 - イメージは Terraform では管理しない(`ignore_changes`)。初期値は placeholder で、GitHub Actions が更新する
 - `deletion_protection` は prod のみ有効
-- 起動時間(コンテナの立ち上げ)が毎回かかる。通知時刻のずれの許容は Q6 で判断する
+- 起動時間(コンテナの立ち上げ)が毎回かかる。許容する通知時刻のずれは、起動間隔(5 分)まで(D35)
 
 ## Cloud Scheduler
 
-- 毎分(`* * * * *`、Asia/Tokyo)、Cloud Run Jobs API で `line-notifier-scan` を起動する
-- 再試行しない(次の分の実行で拾う。重複は backend の冪等性で防ぐ)
+- 5 分ごと(`*/5 * * * *`、Asia/Tokyo)、Cloud Run Jobs API で `line-notifier-scan` を起動する
+- 起動間隔は、モジュールの変数 `schedule` で変える。Job は最低 1 分が課金されるため、間隔を短くすると費用が増える(目安: prod のみで、5 分ごとは月約 $5、毎分は月約 $44。料金は変わりうるので、公式で確認する。D35)
+- 再試行しない(次の実行で拾う。重複は backend の冪等性で防ぐ)
 - 前の実行が長引くと、次の実行と重なる。排他は backend 側で担保する(Q11)
 - 初回デプロイ前は、Job のイメージが placeholder のため、`scheduler_paused = true`(既定)で一時停止しておき、最初のデプロイ後に Environment の variable `SCHEDULER_PAUSED` を `false` にして再デプロイする
 - ジョブは環境ごとに 1 つ。課金アカウントは全環境で共通(D19)で、Scheduler の無料枠(3 ジョブ/課金アカウント)は dev と prod で合算されるが、現状は 2 ジョブなので収まる。ジョブを増やす場合は残り 1 つになる点に注意
