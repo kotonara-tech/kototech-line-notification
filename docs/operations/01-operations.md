@@ -4,7 +4,7 @@
 
 | ブランチ | 役割 | 保護 | デプロイ先 |
 | --- | --- | --- | --- |
-| `main` | **本番(prod)の写し**。main の内容 = prod にデプロイされているもの | あり(下記) | prod |
+| `main` | **本番(prod)の写し**。main の内容 = prod にデプロイされているもの(prod への反映は手動起動のため、起動するまでは古い `main` のまま。ずれの自動の検知は未実施) | あり(下記) | prod |
 | `develop` | 開発の統合ブランチ。作業の起点 | あり(Ruleset `develop-squash-only`。PR 必須・スカッシュのみ・削除と force push の禁止) | dev |
 | `feature/*` など | 個別の作業ブランチ。`develop` から切る | なし | なし(手動で dev へデプロイ可) |
 
@@ -28,14 +28,14 @@
 | CI | push 時に QA が走る(`deploy-to-dev`) | 同左 + PR で `ci` が必須 |
 
 - フェーズ 2 への移行は、プロトタイプの機能が揃い、dev で安定して動くことを目安に判断する(移行時に保護を設定する)
-- フェーズ 1 でも、`main` にマージされると prod へのデプロイ(承認待ち)が起動する。prod への反映は Environment `prod` の承認で止められる
+- フェーズ 1 でも、`main` にマージしただけでは、prod へのデプロイは起動しない。マージのあとに、`deploy-to-prod` を手動で起動する(「リリースフロー(prod)」)。prod への反映は Environment `prod` の承認で止められる
 
 ```mermaid
 flowchart LR
     F[feature/* fix/* chore/*] -->|PR + ci| D[develop]
     D -->|push で自動| Dev[dev 環境にデプロイ]
     D -->|リリース PR + ci| M[main]
-    M -->|push で承認後に| Prod[prod 環境にデプロイ]
+    M -->|手動起動で承認後に| Prod[prod 環境にデプロイ]
     H[hotfix/*<br/>main から切る] -->|PR + ci| M
     M -.->|バックマージ| D
 ```
@@ -114,14 +114,14 @@ git push --force-with-lease --force-if-includes origin <作業ブランチ名>
 1. `develop` から `main` への PR を作る(リリース PR)
 2. `ci` が通ることを確認し、レビューを受ける
 3. **merge commit** で `main` へマージする(`main` と `develop` の履歴を揃え、差分が溜まらないようにする)
-4. `main` への push で `deploy-to-prod` が起動する
+4. マージのあとに、`deploy-to-prod` を手動で起動する。最新の `main` の先頭の SHA を入力する(一致しないと、最初のジョブ `guard` が失敗して、何も動かない)
 5. GitHub の Environment `prod` の **Required reviewers の承認**後に、prod へデプロイされる
 6. デプロイ後、prod の動作を確認する
 7. `main` のマージコミットにバージョンタグを付け、リリースノートを書く(下記「リリースとバージョニング」)
 
-- リリース PR のマージ(`main` への push)で起動するのは `deploy-to-prod` だけで、`deploy-to-dev` は起動しない(`develop` が変わらないため)
+- リリース PR のマージ(`main` への push)では、どのデプロイも自動で起動しない。`deploy-to-dev` は `develop` が変わらないため起動せず、`deploy-to-prod` は手動起動のみ
 - マージ直後の `main` と `develop` は、内容が同じ(`main` に増えるのは、マージコミットだけ)。リリースのあとに、`main` を `develop` へ反映する必要はない
-- コマンドと確認を含む手順書は、[03-release.md](03-release.md) にある
+- 起動のコマンド、SHA の取り方、確認を含む手順書は、[03-release.md](03-release.md) にある。起動の検査(`guard`)は、[../engineering/02-infra.md](../engineering/02-infra.md) の「CD」
 
 ## リリースとバージョニング
 
@@ -135,7 +135,7 @@ git push --force-with-lease --force-if-includes origin <作業ブランチ名>
 ## hotfix フロー(フェーズ 2)
 
 1. `main` から `hotfix/*` を切って修正する
-2. `main` へ PR を作り、`ci` と承認を経てマージする → prod へデプロイされる
+2. `main` へ PR を作り、`ci` と承認を経てマージする。マージのあとに、`deploy-to-prod` を手動で起動して(最新の `main` の SHA を入力)、prod へデプロイする
 3. 同じ修正を `develop` へバックマージする(`main` → `develop` の PR)
    - スカッシュマージで `develop` への push になり、`deploy-to-dev` が起動する。修正が `develop` に入る(内容が変わる)ので、dev にも配備される
    - `develop` が、すでに同じ修正を持っていて、内容が変わらないときは、自動で配備が飛ばされる(「デプロイとの対応」の「差分がないときの動き」)
@@ -177,11 +177,11 @@ GitHub の Settings → Rules → Rulesets で設定している。リポジト�
 | PR(任意のブランチ) | `ci` | なし(QA のみ) |
 | `develop` へ push | `deploy-to-dev`(QA → インフラ → アプリ) | dev |
 | 手動(任意のブランチ) | `deploy-to-dev` | dev |
-| `main` へ push | `deploy-to-prod`(QA → インフラ → アプリ) | prod(承認あり) |
-| 手動(`main` のみ) | `deploy-to-prod` | prod(承認あり) |
+| 手動(`main` のみ。最新の `main` の SHA が必須) | `deploy-to-prod`(`guard` → QA → インフラ → アプリ) | prod(承認あり) |
 | 手動(任意のブランチ) | `apply-to-dev`(インフラだけ。plan のみも可) | dev |
-| 手動(`main` のみ) | `apply-to-prod`(インフラだけ。plan のみも可) | prod(承認あり) |
+| 手動(`main` のみ。最新の `main` の SHA が必須) | `apply-to-prod`(`guard` → インフラだけ。plan のみも可) | prod(承認あり) |
 
+- `deploy-to-prod` と `apply-to-prod` は、手動起動のみ。入力 `sha` が、いまの `main` の先頭と一致しないと、最初のジョブ `guard` が失敗して、以降は動かない([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)
 - prod は Workload Identity の条件でも、`refs/heads/main` 以外からの認証を拒否する
 - ワークフローの詳細は [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」を参照
 
@@ -203,7 +203,7 @@ GitHub の Settings → Rules → Rulesets で設定している。リポジト�
 
 - Terraform の変更も、通常のコードと同じ PR フローで扱う(`ci` で `fmt` / `validate` を検証)
 - `apply` は GitHub Actions から実行する(D22)。`deploy-to-dev` / `deploy-to-prod` の中で、QA の後・アプリのデプロイの前に `reusable-infra-deploy` が走る
-- 削除(作り直しを含む)を含む計画は、`deploy-to-*` が止まる。意図した削除は、`apply-to-*` を `allow_destroy` を `true` にして実行する(まず `apply` を false にして一覧を確かめる)。詳細は [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」、復旧は [02-recovery.md](02-recovery.md)
+- 削除(作り直しを含む)を含む計画は、`deploy-to-*` が止まる。意図した削除は、`apply-to-*` を `allow_destroy` を `true` にして実行する(まず `apply` を false にして一覧を確かめる。`apply-to-prod` は、最新の `main` の SHA(`sha`)も入力する)。詳細は [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」、復旧は [02-recovery.md](02-recovery.md)
 - 最初の `apply`(OIDC ができる前)だけは、担当者が手元で実行する
 - prod の `plan` / `apply` は、Workload Identity の条件により `main` からのみ実行できる
 

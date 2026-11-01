@@ -28,7 +28,7 @@ Terraform が、リソースを意図せず削除・作り直ししたときの�
   - 実行の種類。ジョブ名が `terraform (plan)` なら plan のみ、`terraform (plan / apply)` なら apply まで進む
   - 起動した人に、`allow_destroy` を `true` にしていないかを聞く(削除を許す指定)
   - `gh variable list --env prod` で、`GCP_PROJECT_ID` などの値の先頭・末尾に、空白がないか
-- 迷ったときは、その実行を承認せず、キャンセルする。次に、`apply-to-prod` を `apply` が false で起動する。**この plan のみの実行も、Environment `prod` の承認を求められる**ため、承認する(`apply` しないので安全)。ステップサマリの「削除を含む変更」を読んでから、本番の実行に進む
+- 迷ったときは、その実行を承認せず、キャンセルする。次に、`apply-to-prod` を、最新の `main` の SHA を入力し、`apply` を false にして起動する。**この plan のみの実行も、Environment `prod` の承認を求められる**ため、承認する(`apply` しないので安全)。ステップサマリの「削除を含む変更」を読んでから、本番の実行に進む
 
 ## 手順
 
@@ -96,8 +96,8 @@ unset LINE_CHANNEL_SECRET
 ### 5. デプロイを再実行する
 
 1. 手元で `terraform plan` を実行して、差分が出ないことを確かめる
-2. `apply-to-prod` を、`apply` を false にして起動し、ステップサマリの「削除を含む変更」が「なし」であることを確かめる(承認は求められるが、plan のみで `apply` しない)
-3. `deploy-to-prod` を再実行する(失敗した実行の再実行か、`main` からの手動実行)。イメージは、ビルドして Artifact Registry に push し直される
+2. `apply-to-prod` を、最新の `main` の SHA を入力し、`apply` を false にして起動し、ステップサマリの「削除を含む変更」が「なし」であることを確かめる(承認は求められるが、plan のみで `apply` しない)
+3. `deploy-to-prod` を起動する(最新の `main` の SHA を入力する。手順は [03-release.md](03-release.md) の「手順(リリース)」の 5・6)。失敗した実行の再実行は、`main` が進んでいないときだけ([03-release.md](03-release.md) の「失敗したとき」)。イメージは、ビルドして Artifact Registry に push し直される
 4. 削除を含む計画で止まったときは、**止まった理由を確かめる**。意図したものと確かめられるまで、`allow_destroy` を `true` にしない
 5. デプロイが成功して、Job が動くことを確かめてから、Scheduler を再開する(Environment の variable `SCHEDULER_PAUSED` を `false` にして、再デプロイする)
 

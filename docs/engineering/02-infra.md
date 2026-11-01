@@ -124,12 +124,33 @@ infra/terraform/
 | `reusable-infra-deploy.yml` | Terraform の `init` → `validate` → `plan` → **変更の有無の判定**(変更がなければ `apply` を飛ばす)→ **削除のガード** → `apply`(`apply: false` で plan のみ。`allow_destroy: true` で削除を許可) | 他から呼び出し |
 | `reusable-deploy-backend.yml` | **前回デプロイしたコミットとの差分の判定**(`backend/` に差分がなければ、以降を飛ばす)→ イメージのビルド → Artifact Registry へ push → Cloud Run Job のイメージ更新 | 他から呼び出し |
 | `deploy-to-dev.yml` | QA → インフラ(Terraform)→ **インテグレーションテスト** → アプリのデプロイ | `develop` への push、手動(任意のブランチ) |
-| `deploy-to-prod.yml` | QA → インフラ(Terraform)→ アプリのデプロイ | `main` への push、手動。`main` 以外は拒否 |
+| `deploy-to-prod.yml` | **起動の検査(`guard`)**→ QA → インフラ(Terraform)→ アプリのデプロイ | 手動のみ。最新の `main` の SHA を入力する。`main` 以外は拒否 |
 | `apply-to-dev.yml` | **インフラ(Terraform)だけ**を適用する。QA とアプリのデプロイはしない。`apply` を false にすると plan だけ。`allow_destroy` を true にすると、削除を含む計画も適用する | 手動のみ(任意のブランチ) |
-| `apply-to-prod.yml` | 同上(prod)。`main` 以外は拒否。Environment `prod` の承認あり | 手動のみ |
+| `apply-to-prod.yml` | 同上(prod)。最初に起動の検査(`guard`)。`main` 以外は拒否。Environment `prod` の承認あり | 手動のみ。最新の `main` の SHA を入力する |
 
 - ブランチ運用は [../operations/01-operations.md](../operations/01-operations.md) を参照
 - 認証は Workload Identity Federation(鍵なし)。prod は、Provider の条件でも `refs/heads/main` 以外を拒否する
+- **prod は手動起動のみ。起動の検査(`guard`)**: `deploy-to-prod` と `apply-to-prod` は、`push` では起動しない。入力 `sha`(必須)に、最新の `main` の先頭のコミットの SHA を入れて起動する。起動は、`main` へのマージのあとに行う。最初のジョブ `guard`(composite action `.github/actions/check-main-sha`)が、次の 4 つをすべて確かめ、1 つでも満たさなければ失敗して、続くジョブを動かさない。手順は [../operations/03-release.md](../operations/03-release.md)
+
+  ```
+  gh workflow run deploy-to-prod.yml --ref main -f sha=<最新の main の SHA>
+  gh workflow run apply-to-prod.yml --ref main -f sha=<最新の main の SHA>
+  ```
+
+  1. 起動した ref が `refs/heads/main`(`--ref main` を付ける。省略すると、既定ブランチ `develop` で動こうとして、失敗する)
+  2. 入力 `sha` が 40 桁の 16 進(大文字小文字は同一視。短縮した SHA、前後の空白・改行は不可)
+  3. 入力 `sha` が、いまの `main` の先頭と一致する。先頭は、チェックアウト済みのものではなく、`guard` の実行時に GitHub の API(`git/ref/heads/main`)で取得する。取得に失敗したり、読めない値が返ったりしたときは、通さずに失敗する
+  4. 起動したコミット(`github.sha`)が、同じ先頭と一致する
+- **デプロイ / 適用されるのは、入力した SHA のコミット**(`reusable-*.yml` に SHA を渡す入力はなく、次の同一性に頼る。実行での確認は未実施)
+  - 確認できたこと: `actions/checkout`(v4.2.2)は、`ref` を指定しない同一リポジトリのとき、`github.context.sha`(起動したイベントの SHA)を取得する(`src/input-helper.ts`)。続くジョブが呼ぶ `reusable-*.yml` の `actions/checkout` は、`ref` を指定していない。公式は、呼ばれた側のワークフローについて、「the `github` context is always associated with the caller workflow」と書く([Reusing workflow configurations](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations))
+  - 推論(公式に名指しの記述なし): 呼ばれた側の `github.sha` と、`actions/checkout` が読む値は、起動した側の `github.sha` と同じ。`github.sha` は起動した時点で固定され、途中で `main` が進んでも変わらない
+  - `guard` が `github.sha` = 入力 `sha` = `main` の先頭を確かめるので、取得されるのは入力 `sha` のコミットになる。最初のリリースで、`infra` と `deploy` の `actions/checkout` が取得したコミットが入力 `sha` と同じであることを、実行のログで確かめる([../operations/03-release.md](../operations/03-release.md) の「最初の起動で確かめること」)
+- **同一性が成り立たなくなる場合**:
+  - `guard` のあとに `main` が進んだとき: 続くジョブは、入力 `sha` のコミットを使い続ける。入力した SHA は出るが、最新の `main` ではなくなる。実行の途中では、検査し直さない。最新の `main` を出すときは、新しい SHA で起動し直し、古い実行は承認待ちの間にキャンセルする
+  - 失敗したジョブだけの再実行(`gh run rerun <ID> --failed`): 再実行されるのは、失敗したジョブと、それに依存するジョブ([Re-run failed jobs](https://docs.github.com/en/rest/actions/workflow-runs) の説明)。成功済みの `guard` は再実行されないので、`main` が進んでいても検査し直さない。`main` が進んでいないことを確かめてから使う
+  - 全ジョブの再実行(`gh run rerun <ID>`): `guard` も再実行される。`github.sha` は元の実行と同じ([Re-running workflows and jobs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs))なので、`main` が進んでいれば失敗する。入力 `sha` が元の実行と同じ値で渡されるかは、未確認。渡されなければ、形式の検査で失敗する(安全側)。そのときは、新しい SHA で起動し直す
+  - 起動した ref のワークフロー定義が使われる: `guard` を外した別ブランチの定義は、`guard` では止まらない。止めるのは、prod の Workload Identity の条件(`refs/heads/main` 以外の認証を拒否)
+  - `reusable-infra-deploy.yml` や `reusable-deploy-backend.yml` の `actions/checkout` に `ref:` を足したとき: `guard` を通っても、別のコミットが使われうる。足すなら、入力 `sha` を渡して明示的にチェックアウトする形にし、この同一性への依存をなくす。この前提を守る自動の検査は、今はない(`scripts/verify.mjs` への追加は未実施)
 - 接続情報は、GitHub の **Environment**(`dev` / `prod`)の variables から読む。値は Terraform の出力
 
 | Environment variable | 値の出どころ |
@@ -153,12 +174,14 @@ infra/terraform/
 - **デプロイの要否は、差分の機械的な検出で決める**(コミットのメッセージなどには頼らない)。backend は、Job のイメージのタグ(前回デプロイしたコミット)と今のコミットの `backend/` の差分、インフラは、`plan` の変更の有無。判定できないときは、デプロイする。詳細は [../operations/01-operations.md](../operations/01-operations.md) の「差分がないときの動き」
 - Terraform は GitHub Actions から実行する(D22)。`reusable-infra-deploy.yml` が `plan` の結果を保存し、**そのプランをそのまま `apply`** する。`plan` の内容はジョブのサマリに出力される
 - **削除のガード**: `plan` の後、`apply` の前に、`terraform show -json` から、`delete` を含む変更(作り直しの `replace` を含む)の**リソースのアドレスとアクションだけ**を取り出す(`plan` の値は機密を含みうるため、出力しない)。1 件でもあり、入力 `allow_destroy`(既定 `false`)が `false` なら、`apply` を止めてジョブを失敗させ、一覧をステップサマリに出す。`apply: false`(plan のみ)のときは、失敗させず、警告として一覧を出す
-- `allow_destroy` は、`apply-to-dev` / `apply-to-prod` の手動実行の入力で、既定は `false`。`deploy-to-dev` / `deploy-to-prod` は渡さない(常に `false`)ため、削除を含む計画では、自動のデプロイがインフラの段階で止まる。意図した削除は、`apply` を false にして一覧を確かめてから、`apply-to-*` を `allow_destroy` を true にして実行する。削除や作り直しが起きたときの復旧は [../operations/02-recovery.md](../operations/02-recovery.md)
+- `allow_destroy` は、`apply-to-dev` / `apply-to-prod` の手動実行の入力で、既定は `false`。`deploy-to-dev` / `deploy-to-prod` は渡さない(常に `false`)ため、削除を含む計画では、デプロイがインフラの段階で止まる。意図した削除は、`apply` を false にして一覧を確かめてから、`apply-to-*` を `allow_destroy` を true にして実行する(`apply-to-prod` は、最新の `main` の SHA(`sha`)も入力する)。削除や作り直しが起きたときの復旧は [../operations/02-recovery.md](../operations/02-recovery.md)
 - Terraform の変数(`project_id` など)は、tfvars をコミットしないため、Environment の variables を `TF_VAR_*` として渡す
 - 変数の形式は、`variables.tf` の `validation` で検査する(`project_id`・`region`・`spreadsheet_id`・`line_channel_id`・`github_repository`・`notify_lead_minutes`。`bootstrap` は `state_bucket_name`・`state_admins` も)。Environment の variables の前後に空白が入ると、`plan` がエラーで失敗し、`apply` まで進まない(`project_id`・`region` は provider の設定に使うため、リソースの計画より前に止まる)。エラーメッセージが、確認する GitHub 変数の名前を示す
 - `deploy-to-*` の順序は **QA → インフラ → アプリのデプロイ**。Cloud Run Job や Artifact Registry を Terraform が先に作ってから、イメージを更新する
 - Environment `prod` の承認は、ジョブごとに求められるため、prod では「インフラ」と「アプリのデプロイ」で 2 回承認する
 - **既知の制約**: Environment の承認は、ジョブの開始時に求められるため、`plan` を見る**前**になる(v1.0.0 では、承認の後に、削除を含む計画がそのまま適用された)。削除のガード(上記)が、この点を補う。承認の前に `plan` を確認する形にするには、承認を挟まない plan 専用の Environment を別に用意する必要がある。Environment の variables は Environment ごとなので、同じ値をもう 1 組持つことになる。今回は構成を変えていない(未実施)
+- **既知の制約(承認のあとに検査し直さない)**: `guard` が検査するのは、起動の直後の 1 回だけ。`infra` と `deploy` の承認(Environment `prod`)は、それぞれのジョブの開始時に求められるため、`guard` の検査から、`qa` の所要時間と承認待ちの時間のぶん空く。そのあいだに `main` が進むと、古い `sha` のコミットが、新しい実行のあとに適用されて、prod が巻き戻りうる。失敗したジョブだけの再実行(`gh run rerun <ID> --failed`)でも、成功済みの `guard` は再実行されないので、同じ。今回は、この制約を受け入れ、運用で補う(`main` が進んだら、新しい SHA で起動し直し、承認待ちの古い実行はキャンセルする。[../operations/03-release.md](../operations/03-release.md))。承認者(Required reviewers)が未設定のあいだは、承認待ちがなく、空くのは `qa` の所要時間だけ(Q20)
+- **コードで塞ぐ案(未実施)**: `reusable-infra-deploy.yml` と `reusable-deploy-backend.yml` の `actions/checkout` の直後に、`environment` が `prod` のときだけ、`./.github/actions/check-main-sha` を `sha: ${{ github.sha }}` で呼ぶ。承認のあとのジョブの中で動くので、承認待ちのあいだに `main` が進んでいれば失敗し、`--failed` の再実行でもそのジョブは検査し直される。`reusable-infra-deploy.yml` は別の Issue(#17)も変えるため、調整してから行う
 - PR 上での `plan` は未実装(`ci.yml` には含めていない)。`reusable-infra-deploy.yml` の `apply: false` で追加できる
 
 ## デプロイ用サービスアカウントの権限
@@ -181,7 +204,7 @@ GitHub Actions 用の `github-deployer` には、プロジェクトレベルで�
 
 - `projectIamAdmin` や `serviceAccountAdmin` を持つため、**実質的にプロジェクトの管理者権限**になる。dev は任意のブランチから手動デプロイできるが、prod は Provider の条件で `refs/heads/main` に限定し、Environment `prod` の承認を挟む
 - `secretmanager.admin` は Secret の値を読む権限(`versions.access`)も含む。値を読めない専用のカスタムロールに絞る案は、必要になったら検討する
-- prod の Workload Identity は `refs/heads/main` のみ許可するため、**PR 上では prod の `terraform plan` は実行できない**(dev は可能)。prod の plan / apply は `main` への push 後に行う
+- prod の Workload Identity は `refs/heads/main` のみ許可するため、**PR 上では prod の `terraform plan` は実行できない**(dev は可能)。prod の plan / apply は、`main` へのマージ後に、手動で起動して行う(最新の `main` の SHA を入力)
 - `terraform apply` で Workload Identity Pool・サービスアカウント・IAM 自体を変更すると、実行中の認証を壊す恐れがある。変更時は plan の差分を必ず確認する
 
 ## 未実施・未決

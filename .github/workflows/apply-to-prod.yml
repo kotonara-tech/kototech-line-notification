@@ -1,11 +1,18 @@
 name: apply-to-prod
 
 # prod のインフラ(Terraform)だけを、手動で適用する。アプリのデプロイや QA は行わない。
+# 最新の main の先頭の SHA を入力して起動する。最初のジョブ guard が、入力が最新の main と一致しないときに失敗し、infra を動かさない。
+#   gh workflow run apply-to-prod.yml --ref main -f sha=<最新の main の SHA>
+# 適用されるのは、起動したコミット(github.sha)。同じ SHA になる理由は、docs/engineering/02-infra.md の「CD」。
 # main 以外は拒否する(Workload Identity の条件でも、refs/heads/main 以外の認証は拒否される)。
 # GitHub の Environment `prod` に Required reviewers を設定して、承認を挟む。
 on:
   workflow_dispatch:
     inputs:
+      sha:
+        description: 最新の main の先頭のコミットの SHA(40 桁の 16 進)。一致しないと失敗する
+        type: string
+        required: true
       apply:
         description: false にすると plan だけを実行する(apply しない)
         type: boolean
@@ -19,7 +26,22 @@ permissions:
   contents: read
 
 jobs:
+  # 最初に動く。失敗すると、infra は動かない
+  guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # ローカル action を読むためだけの取得。git の認証情報は残さない
+
+      - uses: ./.github/actions/check-main-sha
+        with:
+          sha: ${{ inputs.sha }}
+
   infra:
+    needs: guard
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-infra-deploy.yml
     permissions:
