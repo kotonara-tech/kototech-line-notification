@@ -38,7 +38,7 @@
 | D13 | ビルドする Go バイナリ・イメージは 1 つ。切り替えは環境変数 `ROLE` に一本化し、Job でも使う(`scan` / 将来 `api`) | 配布物の一本化。将来 API を同じコードベースで追加するため |
 | D14 | MVP は Scheduler → Cloud Run Job → Sheets API / LINE の構成とする | 旧 GAS 案を廃止(D1) |
 | D15 | GCP プロジェクトは ops / dev / prod の 3 つに分ける。ops には state バケットのみ置く | AWS のアカウント分割に相当。VPC は使わない |
-| D16 | GitHub Actions は reusable workflow(qa / deploy-backend)を `ci` と `deploy-to-*` から呼ぶ。dev は `develop` への push + 手動、prod は `main` への push + 手動(main 限定、承認あり) | main は prod の写し(operations/01-operations.md) |
+| D16 | GitHub Actions は reusable workflow(qa / deploy-backend)を `ci` と `deploy-to-*` から呼ぶ。dev は `develop` への push + 手動、prod は手動のみ(main 限定。最新の `main` の SHA を入力し、最初のジョブ `guard` が一致を検査する。承認あり。Issue #18 で、`main` への push での起動をやめた) | main は prod の写し(operations/01-operations.md) |
 | D17 | リリースは `main` のコミットにタグ(`vMAJOR.MINOR.PATCH`)を付け、GitHub Releases にリリースノートを書く | バージョンと変更点の追跡 |
 | D18 | `main` の保護は、開発が安定した最後に掛ける予定だった(D33 で、マージ方法の固定のため、PR 必須まで前倒しした)。承認は、PR 必須のうえで、**他の人の Approve が 1 件必須**(自己承認・バイパスなし)にする。Approve できるメンバーが揃ってから設定する | 初期の開発速度を優先しつつ、安定後に品質を担保する |
 | D19 | 全環境(ops / dev / prod)の課金アカウントは共通にする | 管理の簡素化 |
