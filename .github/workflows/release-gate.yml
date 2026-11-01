@@ -1,0 +1,263 @@
+name: release-gate
+
+# main 宛ての PR(リリース PR)に、PR のマイルストーンの Issue が終わっているかを、コメントで示す(リリースゲート)。
+# 情報の提示だけで、リリースをブロックしない。終わっていない Issue があっても、取得やコメントに失敗しても、成功で終える。
+# ci.yml とは別のワークフローにして、必須のステータスチェックに含めない。内容と運用は docs/operations/04-release-gate.md。
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited, milestoned, demilestoned]
+
+# コメントの作成・更新に pull-requests: write、Issue の読み取りに issues: read。ほかは none(checkout もしない)
+permissions:
+  pull-requests: write
+  issues: read
+
+# 同じ PR で並んで動くと、目印のコメントが 2 つできるため、PR ごとに 1 つずつ動かす(動いている書き込みは中断させない。
+# 3 つ以上が重なると、待機中の古い実行は、新しい実行に置き換えられて取り消される。最後の実行が最新を書く)
+concurrency:
+  group: release-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      # コメントの先頭行。これで始まる、投稿者が Bot のコメント(GITHUB_TOKEN で書いたもの)を、このワークフローのものとして上書きする
+      MARKER: '<!-- release-gate -->'
+    steps:
+      # PR の「今の」マイルストーンを GraphQL で読む(再実行でも、実行時点の値になる)。
+      # Milestone.issues は Issue だけを返す(REST の Issue 一覧と違い、PR を含まない)。100 件ずつ、最後まで読む。
+      # 失敗しても成功で終える(continue-on-error は、予期しない失敗の保険。次のステップは、組み立てに成功したときだけ動く)。
+      # gh が固まっても、同じ PR の後続の実行を待たせ続けないよう、ステップごとに 5 分で打ち切る(打ち切りも continue-on-error の対象)
+      - name: マイルストーンの Issue を集めて、コメントを組み立てる
+        id: build
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -o pipefail
+
+          out="$RUNNER_TEMP/release-gate.md"
+          pages="$RUNNER_TEMP/release-gate-pages.ndjson"
+          err="$RUNNER_TEMP/release-gate-error.txt"
+
+          # メッセージは 1 行目だけを使い、::warning:: の 1 行に収める(% は workflow command のエスケープ記号なので %25 にする)
+          warn() {
+            printf '::warning title=リリースゲート::%s\n' "$(printf '%s' "$1" | head -n 1 | tr -d '\r' | sed 's/%/%25/g')"
+          }
+          give_up() {
+            warn "$1"
+            exit 0
+          }
+
+          if [ -z "${PR_NUMBER:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ]; then
+            give_up "PR の番号かリポジトリ名が空のため、何もしない"
+          fi
+
+          query='
+          query($owner: String!, $name: String!, $pr: Int!, $after: String) {
+            repository(owner: $owner, name: $name) {
+              pullRequest(number: $pr) {
+                milestone {
+                  title
+                  url
+                  issues(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      number
+                      title
+                      url
+                      state
+                      labels(first: 20) { nodes { name } }
+                      subIssuesSummary { total completed }
+                    }
+                  }
+                }
+              }
+            }
+          }'
+
+          : > "$pages"
+          has_milestone=false
+          ms_title=''
+          ms_url=''
+          after=''
+          page=0
+          while :; do
+            page=$((page + 1))
+            if [ "$page" -gt 50 ]; then
+              give_up "Issue が 5000 件を超えたため、取得をやめた。コメントは更新しない"
+            fi
+
+            args=(-f owner="${GITHUB_REPOSITORY%%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" -f query="$query")
+            [ -n "$after" ] && args+=(-f after="$after")
+            if ! res=$(gh api graphql "${args[@]}" 2>"$err"); then
+              give_up "Issue の取得に失敗した。コメントは更新しない: $(head -n 1 "$err")"
+            fi
+            if ! printf '%s' "$res" | jq -e '.errors == null and .data.repository.pullRequest != null' >/dev/null 2>&1; then
+              give_up "Issue の取得の応答にエラーがあるか、PR が見つからない。コメントは更新しない"
+            fi
+
+            if [ "$page" -eq 1 ]; then
+              if [ "$(printf '%s' "$res" | jq -r '.data.repository.pullRequest.milestone == null')" = true ]; then
+                break
+              fi
+              has_milestone=true
+              ms_title=$(printf '%s' "$res" | jq -r '.data.repository.pullRequest.milestone.title')
+              ms_url=$(printf '%s' "$res" | jq -r '.data.repository.pullRequest.milestone.url')
+            fi
+
+            if ! printf '%s' "$res" | jq -ec '.data.repository.pullRequest.milestone.issues.nodes | arrays' >> "$pages" 2>/dev/null; then
+              give_up "Issue の一覧を読めなかった(取得の途中でマイルストーンが外れた可能性)。コメントは更新しない"
+            fi
+
+            # 次のページがあるのに位置が取れないときに、途中までの内容を最後まで読んだことにしない(「すべて済」と誤って出さない)
+            has_next=$(printf '%s' "$res" | jq -r '.data.repository.pullRequest.milestone.issues.pageInfo.hasNextPage')
+            case "$has_next" in
+              false) break ;;
+              true) ;;
+              *) give_up "ページ情報を読めないため、取得をやめた。コメントは更新しない" ;;
+            esac
+            next=$(printf '%s' "$res" | jq -r '.data.repository.pullRequest.milestone.issues.pageInfo.endCursor // ""')
+            if [ -z "$next" ]; then
+              give_up "次のページの位置が取れないため、取得をやめた。コメントは更新しない"
+            fi
+            if [ "$next" = "$after" ]; then
+              give_up "次のページの位置が進まないため、取得をやめた。コメントは更新しない"
+            fi
+            after=$next
+          done
+
+          # 人が書ける文字列(Issue とマイルストーンのタイトル)は、Markdown が崩れないように整える。
+          # - 改行とタブは空白にする(表の行が崩れる)
+          # - \ ` * _ ~ [ ] < > | & ! $ は、\ を前に付けて、そのまま表示する(表・強調・リンク・HTML・コード・数式にならない)
+          # - @ の後ろにゼロ幅スペースを入れる(@メンションで、通知が飛ばない)
+          # 子 Issue を持つ親 Issue(subIssuesSummary.total が 1 以上)は、数えずに、別の表に分ける。
+          # 終わっている = クローズ済み(理由は問わない)。コメントの上限(65536 文字)に収まるよう、本体を 60000 文字で切る
+          # (行の途中では切らず、切ったら注記を付ける。末尾の「更新」の行は切らずに付ける)。nodes の要素が null でも、読み飛ばす
+          if ! jq -rn \
+            --slurpfile pages "$pages" \
+            --argjson has_milestone "$has_milestone" \
+            --arg marker "$MARKER" \
+            --arg title "$ms_title" \
+            --arg url "$ms_url" \
+            --arg updated "$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')" \
+            --arg run_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg doc_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/develop/docs/operations/04-release-gate.md" \
+            '
+            def esc:
+              gsub("[\\r\\n\\t]+"; " ")
+              | gsub("(?<c>[\\\\`*_~\\[\\]<>|&!$])"; "\\" + .c)
+              | gsub("@"; "@\u200b");
+            def area:
+              [(.labels.nodes // [])[].name | select(. == "INFRA" or . == "BE" or . == "DOCS" or . == "CORE")]
+              | if length == 0 then "なし" else join(", ") end;
+            def has_children: (.subIssuesSummary.total // 0) > 0;
+            def link: "[#\(.number)](\(.url))";
+
+            ($pages | add // [] | map(select(. != null)) | unique_by(.number)) as $all
+            | ($all | map(select(has_children | not))) as $targets
+            | ($all | map(select(has_children))) as $parents
+            | ($parents | map(select((.subIssuesSummary.completed // 0) < .subIssuesSummary.total))) as $open_parents
+            | ($targets | length) as $total
+            | ($targets | map(select(.state == "CLOSED")) | length) as $done
+            | (
+                (
+                [$marker, "## リリースゲート", ""]
+                + (if $has_milestone | not then
+                    ["マイルストーンが未設定のため、確認する Issue がない。この PR にマイルストーンを設定すると、このコメントが更新される。", ""]
+                  else
+                    ["マイルストーン: [\($title | esc)](\($url))", "",
+                     (if $total == 0 then "対象の Issue はない(0 件)。"
+                      elif $done == $total then "**済 \($done) / 対象 \($total) 件**(すべて済)"
+                      else "**済 \($done) / 対象 \($total) 件**(未 \($total - $done) 件)" end),
+                     ""]
+                    + (if $done == $total and ($open_parents | length) > 0 then
+                        ["ただし、対象外の親 Issue \($open_parents | length) 件に、終わっていない子 Issue がある。子 Issue がこのマイルストーンにないと、上の数に入らない。下の「対象外」の表で確かめる。", ""]
+                      else [] end)
+                    + (if $total == 0 then [] else
+                        ["| Issue | タイトル | 領域 | 状態 |", "| --- | --- | --- | --- |"]
+                        + ($targets | map("| \(link) | \((.title // "") | esc) | \(area) | \(if .state == "CLOSED" then "済" else "**未**" end) |"))
+                        + [""]
+                      end)
+                    + (if ($parents | length) == 0 then [] else
+                        ["### 対象外(子 Issue を持つ親 Issue)", "",
+                         "親 Issue の完了は、子 Issue の完了で決まるため、数えない。子 Issue は、このマイルストーンにあれば、対象として数える。", "",
+                         "| Issue | タイトル | 領域 | 子 Issue(済 / 全体) |", "| --- | --- | --- | --- |"]
+                        + ($parents | map("| \(link) | \((.title // "") | esc) | \(area) | \(.subIssuesSummary.completed // 0) / \(.subIssuesSummary.total) |"))
+                        + [""]
+                      end)
+                  end)
+                )
+                | join("\n")
+                | rtrimstr("\n")
+                | if length > 60000 then (.[0:60000] | split("\n") | .[:-1] | join("\n")) + "\n\n(長すぎるため、途中で切った)" else . end
+              ) as $main
+            | $main
+              + "\n\n---\n\n"
+              + "情報の提示だけで、マージはブロックしない。更新されるのは、この PR の作成・開き直し・コミットの追加・編集・マイルストーンの変更のときと、workflow を再実行したとき。Issue を閉じただけでは更新されない。"
+              + "\n\n"
+              + "更新: \($updated) JST([実行](\($run_url)))。仕組みは [04-release-gate.md](\($doc_url))"
+            ' > "$out" 2>"$err"; then
+            give_up "コメントの組み立てに失敗した。コメントは更新しない: $(head -n 1 "$err")"
+          fi
+
+          # コメントに書けない場合(fork の PR など)でも読めるように、実行のサマリにも同じ内容を出す
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            cat "$out" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "built=true" >> "$GITHUB_OUTPUT"
+
+      # 目印で始まる Bot のコメントがあれば上書きし、なければ作る(コメントは 1 つのまま)。
+      # 失敗しても成功で終える。fork の PR は GITHUB_TOKEN が読み取り専用になるため、ここで書けずに終わる
+      - name: コメントを作る(目印のコメントがあれば上書きする)
+        if: steps.build.outputs.built == 'true'
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        env:
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -o pipefail
+
+          body="$RUNNER_TEMP/release-gate.md"
+          err="$RUNNER_TEMP/release-gate-error.txt"
+
+          warn() {
+            printf '::warning title=リリースゲート::%s\n' "$(printf '%s' "$1" | head -n 1 | tr -d '\r' | sed 's/%/%25/g')"
+          }
+
+          hint=''
+          if [ "${IS_FORK:-}" = true ]; then
+            hint=' (fork の PR は、トークンが読み取り専用のため、コメントを書けない。内容は、この実行のサマリで読める)'
+          fi
+
+          # 人が書いたコメントを上書きしないよう、投稿者が Bot のものだけを探す。API は古い順に返す
+          if ! ids=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+            --jq '.[] | select(.user.type == "Bot" and ((.body // "") | startswith(env.MARKER))) | .id' 2>"$err"); then
+            warn "既存のコメントを取得できなかった。コメントが増えないよう、書き込まない: $(head -n 1 "$err")"
+            exit 0
+          fi
+
+          id=$(printf '%s\n' "$ids" | head -n 1)
+          count=$(printf '%s\n' "$ids" | grep -c . || true)
+          if [ "$count" -gt 1 ]; then
+            echo "::notice title=リリースゲート::目印のコメントが ${count} 個ある。いちばん古い 1 つ(${id})を更新した。ほかは手で削除する"
+          fi
+
+          if [ -n "$id" ]; then
+            if ! gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${id}" -F body=@"$body" >/dev/null 2>"$err"; then
+              warn "コメントの更新に失敗した: $(head -n 1 "$err")${hint}"
+              exit 0
+            fi
+            echo "コメント ${id} を更新した"
+          else
+            if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -F body=@"$body" >/dev/null 2>"$err"; then
+              warn "コメントの作成に失敗した: $(head -n 1 "$err")${hint}"
+              exit 0
+            fi
+            echo "コメントを作成した"
+          fi

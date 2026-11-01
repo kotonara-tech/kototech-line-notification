@@ -228,7 +228,8 @@ Issue と PR のタイトルは、**領域のプレフィックス**で始める
 - テンプレート(`.github/ISSUE_TEMPLATE/task.md`)の「背景」と「具体的にやること」を埋める
 - 1 つの Issue は、1 つの目的に絞る
 - 「具体的にやること」に、チェックボックスは使わない(PR テンプレートと同じ)。進み具合は、Issue の本文の箇条書きを更新する(終わった項目に「済」と書く、取り消し線を引く)か、コメントで報告する。PR で閉じる Issue は、マージで閉じるため、追うのは閉じる前の長い Issue だけでよい。すでに起票した Issue は、書き換えずに残す
-- 本文の構成、マイルストーン、ボードの項目、`gh` コマンドの注意点は、スキル `issue-professional`(`.claude/skills/issue-professional/SKILL.md`)にまとめている
+- 本文の構成、ボードの項目、`gh` コマンドの注意点(マイルストーンの `gh` の操作を含む)は、スキル `issue-professional`(`.claude/skills/issue-professional/SKILL.md`)にまとめている
+- マイルストーンの命名と期間、親 Issue と子 Issue の使い方、領域ラベルと、`main` 宛ての PR に出るリリースゲートは、[04-release-gate.md](04-release-gate.md) にまとめている
 
 ### PR
 

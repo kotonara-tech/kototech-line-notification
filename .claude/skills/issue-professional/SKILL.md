@@ -31,7 +31,7 @@ gh issue create \
 ## タイトルとラベル
 
 - タイトルは、領域のプレフィックス(`【INFRA】` `【BE】` `【DOCS】` `【CORE】`)で始める。対象の表は `docs/operations/01-operations.md`。**人の名前は入れない**
-- ラベルは、プレフィックスと同じ 4 種類(`INFRA` / `BE` / `DOCS` / `CORE`)から **1 つ**付ける
+- ラベルの種類と付け方は、`docs/operations/04-release-gate.md` の「領域ラベル」にある
 
 ## 本文の構成
 
@@ -66,9 +66,7 @@ gh issue create \
 
 ## マイルストーン
 
-- 名前は `v1.<半年ごと>.<2週ごと>`。2026-11-01 に開始し、最初は `v1.0.1`。`<半年ごと>` が `v1.1.x` に変わる日は、まだ決めていない
-- **期限は、マイルストーン自体**(`due_on`)に設定する。**開始日は、説明欄**に「開始 / 期限」で書く(例: `開始 2026-11-01 / 期限 2026-11-15`)
-- クローズ済みの過去の Issue は、紐づけない
+- 名前、期間、期限と開始日の書き方、紐づける Issue の範囲は、`docs/operations/04-release-gate.md` の「マイルストーンの命名と期間」にある。ここには、`gh` の操作だけを書く
 - 一覧(番号・期限・説明): `gh api 'repos/{owner}/{repo}/milestones?state=all' --jq '.[] | {number, title, due_on, description}'`
 - 改名で番号をずらすときは、**一番後ろのマイルストーンから順に**行う(同じタイトルが並ぶ途中の状態を作らない)。タイトルの重複が拒否されるかは、確かめていない。手順を安全にするための順番である。改名は `gh api repos/{owner}/{repo}/milestones/<number> -X PATCH -f title=<新しい名前>`
 
@@ -90,8 +88,7 @@ gh issue create \
 
 ## 親 Issue と子 Issue
 
-- GitHub の**サブ Issue**を使う。**親 Issue は必須ではない**(親も子も持たない単独の Issue でよい)
-- 子 Issue を持つ親 Issue は、リリースゲート(Issue #20。実装前)が入ると、その対象外になる。親 Issue の完了は、子 Issue の完了で決まるため
+- 使い方(親 Issue は必須かどうか、リリースゲートの対象になる Issue、子 Issue に付けるマイルストーン)は、`docs/operations/04-release-gate.md` の「親 Issue と子 Issue の使い方」にある
 - 子として作る: `gh issue create --parent <親の番号>`。あとから付け外し: `gh issue edit <番号> --parent <親の番号>` / `--remove-parent`(親側からは `--add-sub-issue` / `--remove-sub-issue`)
 
 ## 起票の分け方
