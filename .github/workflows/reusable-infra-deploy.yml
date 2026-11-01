@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       check_release_source:
-        description: true なら、デプロイするコミットが develop で検証済みのものかを、認証の前に検査する。満たさない、または取得に失敗したときは、失敗して先へ進まない(prod の自動デプロイ用。既定は false)
+        description: true なら、デプロイするコミットが develop で検証済みのものかを、認証の前に検査する。満たさない、または取得に失敗したときは、失敗して先へ進まない(prod のデプロイ用。既定は false)
         type: boolean
         default: false
 
@@ -58,8 +58,8 @@ jobs:
         with:
           vars-json: ${{ toJSON(vars) }}
 
-      # prod の自動デプロイ(check_release_source: true)だけ。デプロイするコミットが develop で検証済みのものかを、認証より前に検査する。
-      # 呼び出し元の github.sha(push は push されたコミット、手動実行は選んだブランチの先頭)を見る。取得に失敗したときも失敗する(通さない)。
+      # prod のデプロイ(check_release_source: true)だけ。デプロイするコミットが develop で検証済みのものかを、認証より前に検査する。
+      # 呼び出し元の github.sha(デプロイを起動したコミット)を見る。取得に失敗したときも失敗する(通さない)。
       # apply-to-* は、復旧に使うため、検査しない。Environment の承認はジョブの開始時に求められるため、この検査は承認のあとに動く
       - name: リリース元を検査する
         if: inputs.check_release_source
@@ -67,6 +67,7 @@ jobs:
         with:
           mode: deploy
           sha: ${{ github.sha }}
+          token: ${{ github.token }}
 
       # 認証情報は ADC として扱われる(GOOGLE_APPLICATION_CREDENTIALS)。
       # Terraform の google provider と GCS backend の両方がこれを使う

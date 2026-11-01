@@ -10,6 +10,7 @@ description: main に入る(入った)コミットが、develop で検証済み�
 #     with:
 #       mode: pull_request
 #       sha: ${{ github.event.pull_request.head.sha }}
+#       token: ${{ github.token }}
 # 必要な権限は、contents: read だけ(GitHub の API で、develop の先頭と、コミットの関係を読む)。
 
 inputs:
@@ -24,9 +25,8 @@ inputs:
     required: false
     default: ''
   token:
-    description: GitHub の API を読むトークン。既定は github.token(contents の read 権限で足りる)
-    required: false
-    default: ${{ github.token }}
+    description: GitHub の API を読むトークン。呼び出し側が github.token を渡す(contents の read 権限で足りる)
+    required: true
 
 runs:
   using: composite
@@ -39,7 +39,6 @@ runs:
         MODE: ${{ inputs.mode }}
         SHA: ${{ inputs.sha }}
         HEAD_REF: ${{ inputs.head-ref }}
-        REPO: ${{ github.repository }}
         GH_TOKEN: ${{ inputs.token }}
-        ACTION_PATH: ${{ github.action_path }}
-      run: bash "$ACTION_PATH/check.sh"
+      # リポジトリ名は、ランナーが設定する GITHUB_REPOSITORY を check.sh が読む。action のディレクトリは GITHUB_ACTION_PATH(composite action のみ)
+      run: bash "$GITHUB_ACTION_PATH/check.sh"

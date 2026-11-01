@@ -6,7 +6,7 @@
 #   MODE      pull_request(main 宛ての PR の検査)か、deploy(prod のデプロイの検査)
 #   SHA       検査するコミット(pull_request は PR の head、deploy はデプロイするコミット)。40 桁の小文字の 16 進数
 #   HEAD_REF  pull_request のみ。PR の head のブランチ名。同じリポジトリのブランチのときだけ渡す(fork や不明なときは空)
-#   REPO      owner/repo
+#   REPO      owner/repo。空なら、ランナーが設定する GITHUB_REPOSITORY を使う
 #   GH_TOKEN  gh が使うトークン(contents: read で足りる)
 #
 # 取得(gh api)に失敗したとき、値が読めないとき、想定外の値のときは、通さずに失敗する(fail-closed)。
@@ -17,7 +17,9 @@ DEVELOP_BRANCH=develop
 MODE="${MODE:-}"
 SHA="${SHA:-}"
 HEAD_REF="${HEAD_REF:-}"
-REPO="${REPO:-}"
+REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
+# hotfix の切り元を探すとき、第 2 親から第 1 親の鎖を、最大この数だけたどる(超えたら失敗する)
+WALK_LIMIT=30
 
 say() {
   echo "$1"
@@ -51,22 +53,27 @@ fetch_develop_tip() {
   is_sha "$DEVELOP_TIP" || die "${DEVELOP_BRANCH} の先頭の SHA を読めない。通さずに止めた"
 }
 
-# $1 のコミットが、develop の履歴に含まれる(先頭と同一か、先頭の祖先)なら 0、含まれないなら 1 を返す。
+# $2 のコミットが、$1 の履歴に含まれる($1 と同一か、$1 の祖先)なら 0、含まれないなら 1 を返す。
 # 取得に失敗したときと、想定外の値のときは、返さずに失敗する。
-# compare は、base=develop の先頭、head=$1 で呼ぶ。status は head から見た関係で、
+# compare は、base=$1、head=$2 で呼ぶ。status は head から見た関係で、
 # identical(同一)と behind(head が base の祖先)が「含まれる」、ahead と diverged が「含まれない」
-in_develop() {
+in_history() {
   local status
-  if [ "$1" = "$DEVELOP_TIP" ]; then
+  if [ "$1" = "$2" ]; then
     return 0
   fi
-  status="$(gh api "repos/${REPO}/compare/${DEVELOP_TIP}...${1}" --jq '.status')" \
-    || die "${1:0:7} が ${DEVELOP_BRANCH} の履歴に含まれるかを取得できない(gh api が失敗した)。通さずに止めた。一時的な失敗なら、再実行する"
+  status="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq '.status')" \
+    || die "${2:0:7} が ${1:0:7} の履歴に含まれるかを取得できない(gh api が失敗した)。通さずに止めた。一時的な失敗なら、再実行する"
   case "$status" in
     identical | behind) return 0 ;;
     ahead | diverged) return 1 ;;
-    *) die "${1:0:7} と ${DEVELOP_BRANCH} の関係(status)を読めない。通さずに止めた" ;;
+    *) die "${2:0:7} と ${1:0:7} の関係(status)を読めない。通さずに止めた" ;;
   esac
+}
+
+# $1 のコミットが、develop の履歴に含まれるか
+in_develop() {
+  in_history "$DEVELOP_TIP" "$1"
 }
 
 # $1 のコミットの親を、PARENT_COUNT / FIRST_PARENT / SECOND_PARENT に入れる
@@ -84,11 +91,25 @@ fetch_parents() {
   done
 }
 
-# $1 と $2 の共通の祖先(merge base)を、MERGE_BASE に入れる
-fetch_merge_base() {
-  MERGE_BASE="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq '.merge_base_commit.sha')" \
-    || die "${1:0:7} と ${2:0:7} の共通の祖先を取得できない(gh api が失敗した)。通さずに止めた。一時的な失敗なら、再実行する"
-  is_sha "$MERGE_BASE" || die "${1:0:7} と ${2:0:7} の共通の祖先の SHA を読めない。通さずに止めた"
+# 切り元を探す。$2(マージされた側のブランチの先頭)から、第 1 親の鎖をたどり、
+# $1(マージされた側ではない、それまでの main の先頭)の履歴に含まれる最初のコミットを、BRANCH_POINT に入れる。
+# 第 1 親をたどるのは、ブランチの上で作ったコミットは第 1 親でつながり、main などの取り込み(Update branch など)は第 2 親になるため。
+# つまり、ブランチが main を取り込んでいても、切り元は、ブランチを切ったコミットになる。
+# 鎖が親のないコミットで終わるとき、WALK_LIMIT 個のコミット(第 2 親を含む)を調べても着かないとき、取得に失敗したときは、失敗する
+find_branch_point() {
+  local cur="$2" i
+  for ((i = 0; i < WALK_LIMIT; i++)); do
+    if in_history "$1" "$cur"; then
+      BRANCH_POINT="$cur"
+      return 0
+    fi
+    fetch_parents "$cur"
+    if [ "$PARENT_COUNT" -lt 1 ]; then
+      die "${2:0:7} の履歴をたどったが、${1:0:7} の履歴に着かなかった(親のないコミットに着いた)。通さずに止めた"
+    fi
+    cur="$FIRST_PARENT"
+  done
+  die "${2:0:7} から第 1 親の鎖を ${WALK_LIMIT} 個のコミット調べても、${1:0:7} の履歴に着かなかった(長いブランチ)。切り元を判定できないので、通さずに止めた"
 }
 
 # main 宛ての PR: PR の head の先頭が、develop の先頭と同一であること
@@ -127,16 +148,21 @@ check_deploy() {
     pass "マージコミットの第 2 親 ${SECOND_PARENT:0:7} が、${DEVELOP_BRANCH} の履歴に含まれる"
   fi
 
-  # 3. hotfix のマージ: 第 2 親が、main から切ったブランチ。
-  #    第 1 親(main の先頭)との共通の祖先が develop の履歴にない = develop ではなく、main の履歴から分かれている。
+  # 3. hotfix のマージ: 第 2 親のブランチが、main から切られている。
+  #    第 2 親から第 1 親の鎖をたどり、第 1 親(それまでの main の先頭)の履歴に含まれる最初のコミット(切り元)を探す。
+  #    切り元が develop の履歴にあれば、develop から切ったブランチ。main を取り込んでいても(Update branch など)、切り元は変わらない。
+  #    切り元が develop の履歴になければ、main から切ったブランチ(hotfix)とみなす。
   #    デプロイ時は、ブランチ名を確かめられない(PR の情報を読む権限がなく、マージコミットのメッセージにも名前が入らない)。
-  #    そのため、名前ではなく、履歴の形で見る
-  fetch_merge_base "$FIRST_PARENT" "$SECOND_PARENT"
-  if in_develop "$MERGE_BASE"; then
-    die "マージコミット (${SHA:0:7}) の第 2 親 (${SECOND_PARENT:0:7}) は、${DEVELOP_BRANCH} の履歴に含まれず、${DEVELOP_BRANCH} から切ったブランチ(${DEVELOP_BRANCH} で検証されていないコミットを含む)。リリースは ${DEVELOP_BRANCH} → main の PR で出す"
+  #    そのため、名前ではなく、履歴の形で見る。故意に作った履歴(main から切ったブランチに、develop のコミットをマージするなど)は、見分けられない
+  # (find_branch_point は fetch_parents を呼ぶので、FIRST_PARENT などが書き換わる。先に退避する)
+  MAIN_PARENT="$FIRST_PARENT"
+  BRANCH_TIP="$SECOND_PARENT"
+  find_branch_point "$MAIN_PARENT" "$BRANCH_TIP"
+  if in_develop "$BRANCH_POINT"; then
+    die "マージコミット (${SHA:0:7}) の第 2 親 (${BRANCH_TIP:0:7}) は、${DEVELOP_BRANCH} の履歴に含まれず、${DEVELOP_BRANCH} から切ったブランチ(切り元 ${BRANCH_POINT:0:7} が ${DEVELOP_BRANCH} の履歴にある。${DEVELOP_BRANCH} で検証されていないコミットを含む)。リリースは ${DEVELOP_BRANCH} → main の PR で出す"
   fi
-  warn "マージコミット ${SHA:0:7} の第 2 親 ${SECOND_PARENT:0:7} は ${DEVELOP_BRANCH} の履歴に含まれない。main から切ったブランチ(hotfix)のマージとみなして、通した。ブランチ名は、デプロイ時には確かめられない"
-  pass "hotfix のマージとみなした(共通の祖先 ${MERGE_BASE:0:7} は ${DEVELOP_BRANCH} の履歴にない)"
+  warn "マージコミット ${SHA:0:7} の第 2 親 ${BRANCH_TIP:0:7} は ${DEVELOP_BRANCH} の履歴に含まれない。main から切ったブランチ(hotfix)のマージとみなして、通した。ブランチ名は、デプロイ時には確かめられない"
+  pass "hotfix のマージとみなした(切り元 ${BRANCH_POINT:0:7} は ${DEVELOP_BRANCH} の履歴にない)"
 }
 
 [[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "REPO(owner/repo)を読めない。通さずに止めた"
