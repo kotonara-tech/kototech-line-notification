@@ -157,6 +157,64 @@ GitHub の Settings → Rules → Rulesets で設定している。リポジト�
 - 作業ブランチの自動削除(Automatically delete head branches)は、有効にしていない(リリース PR の head である `develop` を、削除しないため)。マージ後に、手で削除する
 - バイパスはなし(管理者にも適用)。緊急時は、Ruleset を一時的に編集する
 
+### リリース元の検査
+
+`develop` で検証されていないコミットが、`main`(= prod)に入らないようにする。`develop` → `main` の流れを、手順書だけでなく CI でも確かめる。検査の本体は composite action `.github/actions/check-release-source`(判定は `check.sh`)で、2 か所から呼ぶ。
+
+| 場面 | 呼び出し元 | 確かめること |
+| --- | --- | --- |
+| `main` 宛ての PR | `check-release-source.yml`(job 名 `release-source`) | PR の head の先頭のコミットが、`develop` の先頭と**同一**か |
+| prod の自動デプロイ | `deploy-to-prod` の `infra` ジョブ(`reusable-infra-deploy` の入力 `check_release_source: true`。認証より前のステップ) | デプロイするコミット(`main` の先頭)が、`develop` で検証済みの内容だけか |
+
+- 失敗すると、PR は `release-source` が失敗になる。デプロイは `infra` ジョブがその場で止まり、認証・`plan`・`apply` と、後ろの `deploy` は動かない(`main` は更新済みだが、prod は変わらない)
+- 検査しないもの: `develop` 宛ての PR、`deploy-to-dev`、`apply-to-prod`(復旧に使うため)
+- 判定には、GitHub の API(`develop` の先頭、コミットの親、2 つのコミットの関係)を使う。取得に失敗したときと、値を読めないときは、通さずに失敗する。一時的な失敗なら、再実行する
+- デプロイの検査は、Environment `prod` の承認のあとに動く(承認はジョブの開始時に求められるため)
+
+**PR の検査**(`main` 宛ての PR だけ)
+
+| PR の head | 結果 |
+| --- | --- |
+| `develop`(先頭が `develop` の先頭と同一) | 通る。`develop` に push があるたびに head が進み、検査も再実行される |
+| `develop` の先頭と同じコミットの別ブランチ | 通る(ブランチ名は見ない) |
+| `feature/*` など、`develop` の先頭と違うコミット | **失敗** |
+| `develop` の古い先頭(`develop` が、PR のあとに進んだ) | **失敗**。head を `develop` の先頭に合わせる |
+| `hotfix/*`(このリポジトリのブランチ) | **対象外**(通る)。`main` から切って `main` に出すため、`develop` の履歴を経ない |
+| fork の `hotfix/*`。`hotfix/` で始まらない名前(`hotfixes/x` など) | 対象外にしない(上の規則で判定する) |
+
+**デプロイの検査**(`main` の先頭のコミット。`github.sha`)
+
+| デプロイするコミット | 結果 |
+| --- | --- |
+| リリースのマージコミット(第 2 親が `develop` の履歴に含まれる)。`develop` がその後に進んでいても | 通る |
+| 古いリリースの再デプロイ(`develop` が進んだあとの手動実行、失敗した実行の再実行) | 通る(今の `develop` の履歴に含まれるかを見る) |
+| `develop` の履歴に含まれるコミット(`main` を fast-forward で進めた場合) | 通る |
+| hotfix のマージコミット(第 2 親が、`main` から切ったブランチ)。切ったあとに `main` が進んでいても | 通る(警告を出す) |
+| `develop` から切ったブランチ(`feature/*` など)の `main` への直接のマージ | **失敗** |
+| マージコミットでない(`main` への直接のコミット、スカッシュ・リベースのマージ)。親が 3 つ以上のマージ | **失敗** |
+| 取得の失敗、値を読めない | **失敗** |
+
+- PR は「同一」、デプロイは「`develop` の履歴に含まれる」で見る。デプロイは PR の直後とは限らず、手動実行や再実行のときに `develop` が進んでいても、検証済みのリリースを止めないため
+- デプロイ時は、ブランチ名を確かめられない(PR の情報を読む `pull-requests: read` の権限が `reusable-infra-deploy` になく、このリポジトリのマージコミットのメッセージは PR のタイトルで、ブランチ名が入らない)。そのため、hotfix は名前ではなく履歴の形で見る。第 2 親と第 1 親(それまでの `main` の先頭)の共通の祖先が `develop` の履歴になければ、`main` の履歴から分かれたブランチとみなす。`main` から切った、`hotfix/` 以外の名前(`revert-*` など)のブランチも、通る
+
+**失敗したとき**
+
+| 症状 | 見かた・直し方 |
+| --- | --- |
+| PR の `release-source` が失敗した | ログの「head (…) が、`develop` の先頭 (…) と同一でない」を読む。リリースは `develop` → `main` の PR で出す。`develop` から切ったコピーのブランチ(`release/*` など)が、`develop` に遅れたなら、head を `develop` の先頭に合わせる。緊急修正は、ブランチ名を `hotfix/<Issue番号>-<短い説明>` にする |
+| デプロイの `infra` ジョブの「リリース元を検査する」が失敗した | ログ(とステップサマリ)の理由を読む。`git log --first-parent --format='%h %p %s' origin/main -5` で、`main` に入ったコミットを確かめる。検証されていないコミットなら、prod へは出さずに、取り消す修正を通常のリリースか hotfix で出す([03-release.md](03-release.md) の「失敗したとき」)。検査の誤判定なら、`check.sh` を直す hotfix を出す(その PR も、ブランチ名を `hotfix/*` にして、PR の検査の対象外にする) |
+| 「取得できない」で失敗した | GitHub の API の一時的な失敗が多い。`gh run rerun <ID> --failed`(同じコミットで検査し直す) |
+
+**必須のステータスチェックにするには**
+
+現在は**未設定**。PR の `release-source` が失敗しても、マージはできてしまう(「運用フェーズ」の「現在の状態」)。マージできなくするには、次の順で設定する。
+
+1. この検査が `main` に入ったあと、`main` 宛ての PR で `release-source` が動き、成功することを確かめる
+2. Settings → Rules → Rulesets → `protect-main` で、必須のステータスチェックに `release-source`(job 名)を加える。`ci` の QA など、ほかの設定は、下の「未設定」の表に従う
+3. `hotfix/*` の PR で、`release-source` が(対象外として)成功し、マージできることを確かめる
+
+- `pull_request` で動く検査は、PR のマージ結果で動く。PR が検査の workflow 自体を書き換えると、書き換えた版が動いて迂回できる可能性がある(公式のドキュメントに明記がなく、未確認)。強制する仕組みではなく、うっかりを防ぐ検査として扱う。`.github/` の差分は、リリースの事前確認で中身まで読む([03-release.md](03-release.md))
+
 ### 未設定(Approve できるメンバーが揃ってから)
 
 | 設定 | 値 |

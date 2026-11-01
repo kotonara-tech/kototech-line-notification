@@ -1,0 +1,35 @@
+name: check-release-source
+
+# main 宛ての PR で、PR のマージ元(head)の先頭のコミットが、develop の先頭と同一かを検査する。
+# develop で検証されていないコミットが、main(= prod)に入るのを防ぐ。main 宛て以外の PR(develop 宛てなど)では動かない。
+# hotfix/*(このリポジトリのブランチ)は、main から切って main に出すため、対象外にして通す。
+# 検査の中身は .github/actions/check-release-source、場面の表は docs/operations/01-operations.md の「リリース元の検査」。
+# マージを止めるには、Ruleset で、このジョブ名 `release-source` を必須のステータスチェックに指定する(未設定。同じ小節に手順)。
+# edited は、PR の宛先(base)が変わったときにも起動するため。title や本文の編集でも動くが、軽い検査なので構わない。
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+# 同じ PR の古い実行は、新しい実行で置き換える(検査だけで、途中で止めても何も壊れない)
+concurrency:
+  group: check-release-source-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # job 名は、必須のステータスチェックに指定するため、固定する(式や変数を入れない)
+  release-source:
+    name: release-source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/check-release-source
+        with:
+          mode: pull_request
+          sha: ${{ github.event.pull_request.head.sha }}
+          # hotfix/* を対象外にするのは、同じリポジトリのブランチだけ。fork のブランチは、名前が hotfix/* でも対象外にしない(空で渡す)
+          head-ref: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref || '' }}
