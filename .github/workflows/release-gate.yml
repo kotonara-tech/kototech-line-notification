@@ -13,7 +13,8 @@ permissions:
   pull-requests: write
   issues: read
 
-# 同じ PR で並んで動くと、目印のコメントが 2 つできるため、PR ごとに 1 つずつ動かす(書き込みは中断させない)
+# 同じ PR で並んで動くと、目印のコメントが 2 つできるため、PR ごとに 1 つずつ動かす(動いている書き込みは中断させない。
+# 3 つ以上が重なると、待機中の古い実行は、新しい実行に置き換えられて取り消される。最後の実行が最新を書く)
 concurrency:
   group: release-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -29,10 +30,12 @@ jobs:
     steps:
       # PR の「今の」マイルストーンを GraphQL で読む(再実行でも、実行時点の値になる)。
       # Milestone.issues は Issue だけを返す(REST の Issue 一覧と違い、PR を含まない)。100 件ずつ、最後まで読む。
-      # 失敗しても成功で終える(continue-on-error は、予期しない失敗の保険。次のステップは、組み立てに成功したときだけ動く)
+      # 失敗しても成功で終える(continue-on-error は、予期しない失敗の保険。次のステップは、組み立てに成功したときだけ動く)。
+      # gh が固まっても、同じ PR の後続の実行を待たせ続けないよう、ステップごとに 5 分で打ち切る(打ち切りも continue-on-error の対象)
       - name: マイルストーンの Issue を集めて、コメントを組み立てる
         id: build
         continue-on-error: true
+        timeout-minutes: 5
         shell: bash
         run: |
           set -o pipefail
@@ -111,8 +114,17 @@ jobs:
               give_up "Issue の一覧を読めなかった(取得の途中でマイルストーンが外れた可能性)。コメントは更新しない"
             fi
 
-            next=$(printf '%s' "$res" | jq -r '.data.repository.pullRequest.milestone.issues.pageInfo | if .hasNextPage then .endCursor // "" else "" end')
-            [ -z "$next" ] && break
+            # 次のページがあるのに位置が取れないときに、途中までの内容を最後まで読んだことにしない(「すべて済」と誤って出さない)
+            has_next=$(printf '%s' "$res" | jq -r '.data.repository.pullRequest.milestone.issues.pageInfo.hasNextPage')
+            case "$has_next" in
+              false) break ;;
+              true) ;;
+              *) give_up "ページ情報を読めないため、取得をやめた。コメントは更新しない" ;;
+            esac
+            next=$(printf '%s' "$res" | jq -r '.data.repository.pullRequest.milestone.issues.pageInfo.endCursor // ""')
+            if [ -z "$next" ]; then
+              give_up "次のページの位置が取れないため、取得をやめた。コメントは更新しない"
+            fi
             if [ "$next" = "$after" ]; then
               give_up "次のページの位置が進まないため、取得をやめた。コメントは更新しない"
             fi
@@ -121,10 +133,11 @@ jobs:
 
           # 人が書ける文字列(Issue とマイルストーンのタイトル)は、Markdown が崩れないように整える。
           # - 改行とタブは空白にする(表の行が崩れる)
-          # - \ ` * _ ~ [ ] < > | & ! は、\ を前に付けて、そのまま表示する(表・強調・リンク・HTML・コードにならない)
+          # - \ ` * _ ~ [ ] < > | & ! $ は、\ を前に付けて、そのまま表示する(表・強調・リンク・HTML・コード・数式にならない)
           # - @ の後ろにゼロ幅スペースを入れる(@メンションで、通知が飛ばない)
           # 子 Issue を持つ親 Issue(subIssuesSummary.total が 1 以上)は、数えずに、別の表に分ける。
-          # 終わっている = クローズ済み(理由は問わない)。コメントの上限(65536 文字)に収まるよう、60000 文字で切る
+          # 終わっている = クローズ済み(理由は問わない)。コメントの上限(65536 文字)に収まるよう、本体を 60000 文字で切る
+          # (行の途中では切らず、切ったら注記を付ける。末尾の「更新」の行は切らずに付ける)。nodes の要素が null でも、読み飛ばす
           if ! jq -rn \
             --slurpfile pages "$pages" \
             --argjson has_milestone "$has_milestone" \
@@ -137,20 +150,22 @@ jobs:
             '
             def esc:
               gsub("[\\r\\n\\t]+"; " ")
-              | gsub("(?<c>[\\\\`*_~\\[\\]<>|&!])"; "\\" + .c)
+              | gsub("(?<c>[\\\\`*_~\\[\\]<>|&!$])"; "\\" + .c)
               | gsub("@"; "@\u200b");
             def area:
-              [.labels.nodes[].name | select(. == "INFRA" or . == "BE" or . == "DOCS" or . == "CORE")]
+              [(.labels.nodes // [])[].name | select(. == "INFRA" or . == "BE" or . == "DOCS" or . == "CORE")]
               | if length == 0 then "なし" else join(", ") end;
             def has_children: (.subIssuesSummary.total // 0) > 0;
             def link: "[#\(.number)](\(.url))";
 
-            ($pages | add // [] | unique_by(.number)) as $all
+            ($pages | add // [] | map(select(. != null)) | unique_by(.number)) as $all
             | ($all | map(select(has_children | not))) as $targets
             | ($all | map(select(has_children))) as $parents
+            | ($parents | map(select((.subIssuesSummary.completed // 0) < .subIssuesSummary.total))) as $open_parents
             | ($targets | length) as $total
             | ($targets | map(select(.state == "CLOSED")) | length) as $done
             | (
+                (
                 [$marker, "## リリースゲート", ""]
                 + (if $has_milestone | not then
                     ["マイルストーンが未設定のため、確認する Issue がない。この PR にマイルストーンを設定すると、このコメントが更新される。", ""]
@@ -160,26 +175,32 @@ jobs:
                       elif $done == $total then "**済 \($done) / 対象 \($total) 件**(すべて済)"
                       else "**済 \($done) / 対象 \($total) 件**(未 \($total - $done) 件)" end),
                      ""]
+                    + (if $done == $total and ($open_parents | length) > 0 then
+                        ["ただし、対象外の親 Issue \($open_parents | length) 件に、終わっていない子 Issue がある。子 Issue がこのマイルストーンにないと、上の数に入らない。下の「対象外」の表で確かめる。", ""]
+                      else [] end)
                     + (if $total == 0 then [] else
                         ["| Issue | タイトル | 領域 | 状態 |", "| --- | --- | --- | --- |"]
-                        + ($targets | map("| \(link) | \(.title | esc) | \(area) | \(if .state == "CLOSED" then "済" else "**未**" end) |"))
+                        + ($targets | map("| \(link) | \((.title // "") | esc) | \(area) | \(if .state == "CLOSED" then "済" else "**未**" end) |"))
                         + [""]
                       end)
                     + (if ($parents | length) == 0 then [] else
                         ["### 対象外(子 Issue を持つ親 Issue)", "",
                          "親 Issue の完了は、子 Issue の完了で決まるため、数えない。子 Issue は、このマイルストーンにあれば、対象として数える。", "",
                          "| Issue | タイトル | 領域 | 子 Issue(済 / 全体) |", "| --- | --- | --- | --- |"]
-                        + ($parents | map("| \(link) | \(.title | esc) | \(area) | \(.subIssuesSummary.completed // 0) / \(.subIssuesSummary.total) |"))
+                        + ($parents | map("| \(link) | \((.title // "") | esc) | \(area) | \(.subIssuesSummary.completed // 0) / \(.subIssuesSummary.total) |"))
                         + [""]
                       end)
                   end)
-                + ["---", "",
-                   "情報の提示だけで、マージはブロックしない。更新されるのは、この PR の作成・開き直し・コミットの追加・編集・マイルストーンの変更のときと、workflow を再実行したとき。Issue を閉じただけでは更新されない。",
-                   "",
-                   "更新: \($updated) JST([実行](\($run_url)))。仕組みは [04-release-gate.md](\($doc_url))"]
-              )
-            | join("\n")
-            | if length > 60000 then .[0:60000] + "\n\n(長すぎるため、途中で切った)" else . end
+                )
+                | join("\n")
+                | rtrimstr("\n")
+                | if length > 60000 then (.[0:60000] | split("\n") | .[:-1] | join("\n")) + "\n\n(長すぎるため、途中で切った)" else . end
+              ) as $main
+            | $main
+              + "\n\n---\n\n"
+              + "情報の提示だけで、マージはブロックしない。更新されるのは、この PR の作成・開き直し・コミットの追加・編集・マイルストーンの変更のときと、workflow を再実行したとき。Issue を閉じただけでは更新されない。"
+              + "\n\n"
+              + "更新: \($updated) JST([実行](\($run_url)))。仕組みは [04-release-gate.md](\($doc_url))"
             ' > "$out" 2>"$err"; then
             give_up "コメントの組み立てに失敗した。コメントは更新しない: $(head -n 1 "$err")"
           fi
@@ -195,6 +216,7 @@ jobs:
       - name: コメントを作る(目印のコメントがあれば上書きする)
         if: steps.build.outputs.built == 'true'
         continue-on-error: true
+        timeout-minutes: 5
         shell: bash
         env:
           IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
