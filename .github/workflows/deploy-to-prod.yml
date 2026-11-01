@@ -6,7 +6,8 @@ name: deploy-to-prod
 # 続くジョブは、起動したコミット(github.sha)をデプロイする。guard が、それが入力した SHA と同じであることを確かめる。
 # 同じになる理由と、成り立たなくなる場合は、docs/engineering/02-infra.md の「CD」。
 # Workload Identity の条件で refs/heads/main 以外は認証が拒否される。
-# GitHub の Environment `prod` に Required reviewers を設定して承認を挟む。
+# GitHub の Environment `prod` に承認者(Required reviewers)は設定しない。承認を待たず、guard と qa が通ると、そのまま prod へ反映される(開発の立ち上げ期。D36)。
+# Environment の指定は、prod の variables を読むために残している。止めたいときは、infra の apply が始まる前に、実行をキャンセルする(docs/operations/03-release.md の「起動した実行を止める」)。
 on:
   workflow_dispatch:
     inputs:

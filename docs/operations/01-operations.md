@@ -28,14 +28,14 @@
 | CI | push 時に QA が走る(`deploy-to-dev`) | 同左 + PR で `ci` が必須 |
 
 - フェーズ 2 への移行は、プロトタイプの機能が揃い、dev で安定して動くことを目安に判断する(移行時に保護を設定する)
-- フェーズ 1 でも、`main` にマージしただけでは、prod へのデプロイは起動しない。マージのあとに、`deploy-to-prod` を手動で起動する(「リリースフロー(prod)」)。prod への反映は Environment `prod` の承認で止められる
+- フェーズ 1 でも、`main` にマージしただけでは、prod へのデプロイは起動しない。マージのあとに、`deploy-to-prod` を手動で起動する(「リリースフロー(prod)」)。Environment `prod` の承認は待たない(D36)ため、起動した実行は、止めない限り、そのまま prod へ反映される
 
 ```mermaid
 flowchart LR
     F[feature/* fix/* chore/*] -->|PR + ci| D[develop]
     D -->|push で自動| Dev[dev 環境にデプロイ]
     D -->|リリース PR + ci| M[main]
-    M -->|手動起動で承認後に| Prod[prod 環境にデプロイ]
+    M -->|手動起動で承認なしに| Prod[prod 環境にデプロイ]
     H[hotfix/*<br/>main から切る] -->|PR + ci| M
     M -.->|バックマージ| D
 ```
@@ -114,8 +114,8 @@ git push --force-with-lease --force-if-includes origin <作業ブランチ名>
 1. `develop` から `main` への PR を作る(リリース PR)
 2. `ci` が通ることを確認し、レビューを受ける
 3. **merge commit** で `main` へマージする(`main` と `develop` の履歴を揃え、差分が溜まらないようにする)
-4. マージのあとに、`deploy-to-prod` を手動で起動する。最新の `main` の先頭の SHA を入力する(一致しないと、最初のジョブ `guard` が失敗して、何も動かない)
-5. GitHub の Environment `prod` の **Required reviewers の承認**後に、prod へデプロイされる
+4. マージのあとに、`apply-to-prod` を、最新の `main` の先頭の SHA を入力し、`apply` を false(plan のみ)にして起動する。起動の直後に、ジョブ名が `terraform (plan)` であることを確かめる(`terraform (plan / apply)` なら、`apply` の付け忘れ。すぐにキャンセルする)。ステップサマリの「削除を含む変更」と計画を読む
+5. `deploy-to-prod` を手動で起動する。4 と同じ SHA を入力する(一致しないと、最初のジョブ `guard` が失敗して、何も動かない)。**Environment `prod` の承認は待たない**(D36)ので、`guard` と `qa` が通ると、そのまま prod へデプロイされる。止めたいときは、`apply` が始まる前に、実行をキャンセルする。実行中の画面で `plan` を読んでから止めることは当てにしない(計画の確認は、手順 4 で済ませる。[03-release.md](03-release.md) の「起動した実行を止める」)
 6. デプロイ後、prod の動作を確認する
 7. `main` のマージコミットにバージョンタグを付け、リリースノートを書く(下記「リリースとバージョニング」)
 
@@ -135,7 +135,7 @@ git push --force-with-lease --force-if-includes origin <作業ブランチ名>
 ## hotfix フロー(フェーズ 2)
 
 1. `main` から `hotfix/*` を切って修正する
-2. `main` へ PR を作り、`ci` と承認を経てマージする。マージのあとに、`deploy-to-prod` を手動で起動して(最新の `main` の SHA を入力)、prod へデプロイする
+2. `main` へ PR を作り、`ci` と承認を経てマージする。マージのあとに、`apply-to-prod` の plan のみの実行で計画を読んでから、`deploy-to-prod` を手動で起動して(最新の `main` の SHA を入力)、prod へデプロイする
 3. 同じ修正を `develop` へバックマージする(`main` → `develop` の PR)
    - スカッシュマージで `develop` への push になり、`deploy-to-dev` が起動する。修正が `develop` に入る(内容が変わる)ので、dev にも配備される
    - `develop` が、すでに同じ修正を持っていて、内容が変わらないときは、自動で配備が飛ばされる(「デプロイとの対応」の「差分がないときの動き」)
@@ -169,7 +169,7 @@ GitHub の Settings → Rules → Rulesets で設定している。リポジト�
 - 失敗すると、PR は `release-source` が失敗になる。デプロイは `infra` ジョブがその場で止まり、認証・`plan`・`apply` と、後ろの `deploy` は動かない(`main` は更新済みだが、prod は変わらない)
 - 検査しないもの: `develop` 宛ての PR、`deploy-to-dev`、`apply-to-prod`(復旧に使うため)
 - 判定には、GitHub の API(`develop` の先頭、コミットの親、2 つのコミットの関係)を使う。取得に失敗したときと、値を読めないときは、通さずに失敗する。一時的な失敗なら、再実行する
-- デプロイの検査は、Environment `prod` の承認のあとに動く(承認はジョブの開始時に求められるため)
+- デプロイの検査は、`guard` と `qa` のあとの、`infra` ジョブの中で動く(Environment `prod` の承認は待たない。D36)
 
 **PR の検査**(`main` 宛ての PR だけ)
 
@@ -252,11 +252,12 @@ GitHub の Settings → Rules → Rulesets で設定している。リポジト�
 | PR(任意のブランチ) | `ci` | なし(QA のみ) |
 | `develop` へ push | `deploy-to-dev`(QA → インフラ → アプリ) | dev |
 | 手動(任意のブランチ) | `deploy-to-dev` | dev |
-| 手動(`main` のみ。最新の `main` の SHA が必須) | `deploy-to-prod`(`guard` → QA → インフラ → アプリ) | prod(承認あり) |
+| 手動(`main` のみ。最新の `main` の SHA が必須) | `deploy-to-prod`(`guard` → QA → インフラ → アプリ) | prod(承認なし) |
 | 手動(任意のブランチ) | `apply-to-dev`(インフラだけ。plan のみも可) | dev |
-| 手動(`main` のみ。最新の `main` の SHA が必須) | `apply-to-prod`(`guard` → インフラだけ。plan のみも可) | prod(承認あり) |
+| 手動(`main` のみ。最新の `main` の SHA が必須) | `apply-to-prod`(`guard` → インフラだけ。plan のみも可) | prod(承認なし) |
 
 - `deploy-to-prod` と `apply-to-prod` は、手動起動のみ。入力 `sha` が、いまの `main` の先頭と一致しないと、最初のジョブ `guard` が失敗して、以降は動かない([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)
+- Environment `prod` には承認者を設定していない(承認を待たない。D36)。承認なしで prod を守る仕組みは、[../engineering/02-infra.md](../engineering/02-infra.md) の「prod の保護(承認なし)」
 - prod は Workload Identity の条件でも、`refs/heads/main` 以外からの認証を拒否する
 - ワークフローの詳細は [../engineering/02-infra.md](../engineering/02-infra.md) の「CD」を参照
 
