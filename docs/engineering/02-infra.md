@@ -124,12 +124,29 @@ infra/terraform/
 | `reusable-infra-deploy.yml` | Terraform の `init` → `validate` → `plan` → **変更の有無の判定**(変更がなければ `apply` を飛ばす)→ **削除のガード** → `apply`(`apply: false` で plan のみ。`allow_destroy: true` で削除を許可) | 他から呼び出し |
 | `reusable-deploy-backend.yml` | **前回デプロイしたコミットとの差分の判定**(`backend/` に差分がなければ、以降を飛ばす)→ イメージのビルド → Artifact Registry へ push → Cloud Run Job のイメージ更新 | 他から呼び出し |
 | `deploy-to-dev.yml` | QA → インフラ(Terraform)→ **インテグレーションテスト** → アプリのデプロイ | `develop` への push、手動(任意のブランチ) |
-| `deploy-to-prod.yml` | QA → インフラ(Terraform)→ アプリのデプロイ | `main` への push、手動。`main` 以外は拒否 |
+| `deploy-to-prod.yml` | **起動の検査(`guard`)**→ QA → インフラ(Terraform)→ アプリのデプロイ | 手動のみ。最新の `main` の SHA を入力する。`main` 以外は拒否 |
 | `apply-to-dev.yml` | **インフラ(Terraform)だけ**を適用する。QA とアプリのデプロイはしない。`apply` を false にすると plan だけ。`allow_destroy` を true にすると、削除を含む計画も適用する | 手動のみ(任意のブランチ) |
-| `apply-to-prod.yml` | 同上(prod)。`main` 以外は拒否。Environment `prod` の承認あり | 手動のみ |
+| `apply-to-prod.yml` | 同上(prod)。最初に起動の検査(`guard`)。`main` 以外は拒否。Environment `prod` の承認あり | 手動のみ。最新の `main` の SHA を入力する |
 
 - ブランチ運用は [../operations/01-operations.md](../operations/01-operations.md) を参照
 - 認証は Workload Identity Federation(鍵なし)。prod は、Provider の条件でも `refs/heads/main` 以外を拒否する
+- **prod は手動起動のみ。起動の検査(`guard`)**: `deploy-to-prod` と `apply-to-prod` は、`push` では起動しない。入力 `sha`(必須)に、最新の `main` の先頭のコミットの SHA を入れて起動する。起動は、`main` へのマージのあとに行う。最初のジョブ `guard`(composite action `.github/actions/check-main-sha`)が、次の 4 つをすべて確かめ、1 つでも満たさなければ失敗して、続くジョブを動かさない。手順は [../operations/03-release.md](../operations/03-release.md)
+
+  ```
+  gh workflow run deploy-to-prod.yml --ref main -f sha=<最新の main の SHA>
+  gh workflow run apply-to-prod.yml --ref main -f sha=<最新の main の SHA>
+  ```
+
+  1. 起動した ref が `refs/heads/main`(`--ref main` を付ける。省略すると、既定ブランチ `develop` で動こうとして、失敗する)
+  2. 入力 `sha` が 40 桁の 16 進(大文字小文字は同一視。短縮した SHA、前後の空白・改行は不可)
+  3. 入力 `sha` が、いまの `main` の先頭と一致する。先頭は、チェックアウト済みのものではなく、`guard` の実行時に GitHub の API(`git/ref/heads/main`)で取得する。取得に失敗したり、読めない値が返ったりしたときは、通さずに失敗する
+  4. 起動したコミット(`github.sha`)が、同じ先頭と一致する
+- **デプロイ / 適用されるのは、入力した SHA のコミット**: 続くジョブが呼ぶ `reusable-*.yml` は、`actions/checkout` を ref の指定なしで使い、これは起動したイベントの SHA(`github.sha`)を取得する([actions/checkout](https://github.com/actions/checkout) の `ref`)。`reusable-*.yml` の中でも、`github` コンテキストは起動した側(caller)のもの([Reusing workflow configurations](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations))。`github.sha` は起動した時点で固定され、途中で `main` が進んでも変わらない。`guard` が `github.sha` = 入力 `sha` = `main` の先頭を確かめるので、取得されるのは入力 `sha` のコミットになる。`reusable-*.yml` には、SHA を渡していない(渡す入力もない)
+- **同一性が成り立たなくなる場合**:
+  - `guard` のあとに `main` が進んだとき: 続くジョブは、入力 `sha` のコミットを使い続ける。入力した SHA は出るが、最新の `main` ではなくなる。実行の途中では、検査し直さない。最新の `main` を出すときは、新しい SHA で起動し直し、古い実行は承認待ちの間にキャンセルする
+  - 失敗したジョブだけの再実行(`gh run rerun <ID> --failed`): 再実行されるのは、失敗したジョブと、それに依存するジョブ([Re-run failed jobs](https://docs.github.com/en/rest/actions/workflow-runs) の説明)。成功済みの `guard` は再実行されないので、`main` が進んでいても検査し直さない。`main` が進んでいないことを確かめてから使う
+  - 全ジョブの再実行(`gh run rerun <ID>`): `guard` も再実行される。`github.sha` は元の実行と同じ([Re-running workflows and jobs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs))なので、`main` が進んでいれば失敗する。入力 `sha` が元の実行と同じ値で渡されるかは、未確認。渡されなければ、形式の検査で失敗する(安全側)。そのときは、新しい SHA で起動し直す
+  - 起動した ref のワークフロー定義が使われる: `guard` を外した別ブランチの定義は、`guard` では止まらない。止めるのは、prod の Workload Identity の条件(`refs/heads/main` 以外の認証を拒否)
 - 接続情報は、GitHub の **Environment**(`dev` / `prod`)の variables から読む。値は Terraform の出力
 
 | Environment variable | 値の出どころ |
@@ -181,7 +198,7 @@ GitHub Actions 用の `github-deployer` には、プロジェクトレベルで�
 
 - `projectIamAdmin` や `serviceAccountAdmin` を持つため、**実質的にプロジェクトの管理者権限**になる。dev は任意のブランチから手動デプロイできるが、prod は Provider の条件で `refs/heads/main` に限定し、Environment `prod` の承認を挟む
 - `secretmanager.admin` は Secret の値を読む権限(`versions.access`)も含む。値を読めない専用のカスタムロールに絞る案は、必要になったら検討する
-- prod の Workload Identity は `refs/heads/main` のみ許可するため、**PR 上では prod の `terraform plan` は実行できない**(dev は可能)。prod の plan / apply は `main` への push 後に行う
+- prod の Workload Identity は `refs/heads/main` のみ許可するため、**PR 上では prod の `terraform plan` は実行できない**(dev は可能)。prod の plan / apply は、`main` へのマージ後に、手動で起動して行う(最新の `main` の SHA を入力)
 - `terraform apply` で Workload Identity Pool・サービスアカウント・IAM 自体を変更すると、実行中の認証を壊す恐れがある。変更時は plan の差分を必ず確認する
 
 ## 未実施・未決

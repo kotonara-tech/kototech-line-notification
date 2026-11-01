@@ -1,0 +1,85 @@
+name: check-main-sha
+description: 手動起動した prod 系の実行が、いまの main の先頭のコミットを指していることを検査する。起動した ref が main でない、入力の SHA が 40 桁の 16 進でない、入力の SHA または起動したコミットがいまの main の先頭と一致しない、main の先頭を取得できない、のいずれかで失敗する
+
+# 背景: 意図しない自動実行で prod に反映されないよう、deploy-to-prod / apply-to-prod は手動起動のみにし、
+# 反映するコミットを、実行者が SHA で明示する。呼び出し側は、最初のジョブ(guard)で、checkout のあとにこの action を呼ぶ
+# (ローカル action は、リポジトリの取得後でないと見つからない)。guard が失敗すると、続くジョブは動かない。
+#   guard:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: read
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           persist-credentials: false
+#       - uses: ./.github/actions/check-main-sha
+#         with:
+#           sha: ${{ inputs.sha }}
+#
+# 検査(すべて満たさなければ、失敗する):
+#   1. 起動した ref が refs/heads/main
+#   2. 入力 sha が 40 桁の 16 進(大文字小文字は同一視。短縮した SHA や、前後の空白・改行は不可)
+#   3. 入力 sha が、いまの main の先頭と一致する。先頭は、チェックアウト済みのものではなく、実行時に GitHub の API で取得する。
+#      取得に失敗したり、読めない値が返ったりしたときは、通さずに失敗する(fail-closed)
+#   4. 起動したコミット(GITHUB_SHA)が、同じ先頭と一致する
+#
+# デプロイ / 適用されるコミットが、入力した SHA と同じになる理由:
+#   続くジョブが呼ぶ reusable workflow は、actions/checkout を ref の指定なしで使う。この既定は、起動したイベントの SHA(GITHUB_SHA)を
+#   取得する。reusable workflow の中でも、github コンテキストは、起動した側(caller)のもの。GITHUB_SHA は、起動した時点で固定され、
+#   途中で main が進んでも変わらない。ここで、GITHUB_SHA = 入力 sha = main の先頭 を確かめるので、取得されるのは入力 sha のコミット。
+#   (reusable-*.yml には SHA を渡さず、渡す入力もない)
+# 成り立たなくなる場合:
+#   - guard のあとに main が進んだ場合。続くジョブは、入力 sha のコミットを使い続ける(入力した SHA は出るが、最新の main ではなくなる)。
+#     実行の途中では、検査し直さない。最新の main を出すときは、新しい SHA で起動し直す。古い実行は、承認待ちの間にキャンセルする
+#   - 失敗したジョブだけの再実行(gh run rerun <ID> --failed)。成功済みの guard は再実行されないので、main が進んでいても検査し直さない。
+#     全ジョブの再実行(gh run rerun <ID>)なら、guard が検査し直し、main が進んでいれば失敗する(GITHUB_SHA は元の実行と同じ)
+#   - 起動する ref のワークフロー定義が使われる。guard を外した別ブランチの定義は、この検査では止まらない(prod の Workload Identity の
+#     条件が、refs/heads/main 以外からの認証を拒否する)
+# 詳細は docs/engineering/02-infra.md の「CD」。
+
+inputs:
+  sha:
+    description: 起動時に入力された SHA(最新の main の先頭のコミット)。呼び出し側が inputs.sha を渡す
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: 起動した ref と入力の SHA が、いまの main の先頭と一致することを確認する
+      shell: bash
+      env:
+        # 式の値は、シェルのコマンドに直接埋め込まず、環境変数で渡す(インジェクションを避ける)
+        SHA_INPUT: ${{ inputs.sha }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+
+        fail() {
+          echo "::error title=prod の起動を止めた::$1"
+          exit 1
+        }
+
+        # [[ =~ ]] は文字列全体に一致させる($ は末尾の改行の手前に一致しない)。grep は行ごとなので使わない
+        sha_re='^[0-9a-fA-F]{40}$'
+        lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+        [ "$GITHUB_REF" = 'refs/heads/main' ] || fail "起動した ref が refs/heads/main ではない(${GITHUB_REF})。--ref main を付けて起動する"
+
+        # 形式を確かめる前の値は、ログに出さない(長さだけ出す)
+        [[ "$SHA_INPUT" =~ $sha_re ]] || fail "入力 sha が 40 桁の 16 進ではない(長さ ${#SHA_INPUT})。短縮した SHA や、前後の空白・改行は受け付けない"
+
+        # 取得に失敗したときは、通さずに失敗する。gh が無い、認証がない、404、ネットワークの失敗のいずれも、ここで止まる
+        if ! head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"; then
+          fail "いまの main の先頭を取得できないため、検査できない。時間をおいて、起動し直す"
+        fi
+        [[ "$head_sha" =~ $sha_re ]] || fail "いまの main の先頭として読めない値が返ったため、検査できない"
+
+        input_sha="$(lower "$SHA_INPUT")"
+        head_sha="$(lower "$head_sha")"
+        run_sha="$(lower "$GITHUB_SHA")"
+
+        [ "$input_sha" = "$head_sha" ] || fail "入力 sha(${input_sha})が、いまの main の先頭(${head_sha})と一致しない。git fetch origin のあと、git rev-parse origin/main で取り直して、起動し直す"
+        [ "$run_sha" = "$head_sha" ] || fail "起動したコミット(${run_sha})が、いまの main の先頭(${head_sha})と一致しない。起動のあとに main が進んだ。取り直して、起動し直す"
+
+        echo "入力 sha は、いまの main の先頭と一致した: ${head_sha}"
+        echo "### prod の起動の検査: ${head_sha} は、いまの main の先頭と一致した" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
