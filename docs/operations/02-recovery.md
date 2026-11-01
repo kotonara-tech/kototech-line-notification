@@ -1,6 +1,6 @@
 # 02. 復旧手順(削除・作り直しが起きたとき)
 
-Terraform が、リソースを意図せず削除・作り直ししたときの復旧手順。v1.0.0 のリリースで、prod の GitHub 変数 `GCP_PROJECT_ID` の先頭に空白が入り、Terraform がこれを別のプロジェクトと見なして、prod のリソースを作り直す計画を作った。承認の後に、その計画がそのまま `apply` され、Artifact Registry・Scheduler・デプロイ用サービスアカウント・WIF の Provider などが削除された(Issue #6)。
+Terraform が、リソースを意図せず削除・作り直ししたときの復旧手順。v1.0.0 のリリースで、prod の GitHub 変数 `GCP_PROJECT_ID` の先頭に空白が入り、Terraform がこれを別のプロジェクトと見なして、prod のリソースを作り直す計画を作った。その計画がそのまま `apply` され、Artifact Registry・Scheduler・デプロイ用サービスアカウント・WIF の Provider などが削除された(Issue #6)。
 
 ## 前提
 
@@ -24,11 +24,11 @@ Terraform が、リソースを意図せず削除・作り直ししたときの�
 ## 防ぐ仕組み
 
 - `reusable-infra-deploy.yml` の削除のガードが、`plan` に削除(作り直しを含む)があると、`apply` を止める([../engineering/02-infra.md](../engineering/02-infra.md) の「CD」)
-- **Environment `prod` の承認は、ジョブの開始時に求められ、`plan` を見る前になる**。承認の画面で、`plan` の内容は分からない。承認する前に、次を確認する
-  - 実行の種類。ジョブ名が `terraform (plan)` なら plan のみ、`terraform (plan / apply)` なら apply まで進む
-  - 起動した人に、`allow_destroy` を `true` にしていないかを聞く(削除を許す指定)
-  - `gh variable list --env prod` で、`GCP_PROJECT_ID` などの値の先頭・末尾に、空白がないか
-- 迷ったときは、その実行を承認せず、キャンセルする。次に、`apply-to-prod` を、最新の `main` の SHA を入力し、`apply` を false にして起動する。**この plan のみの実行も、Environment `prod` の承認を求められる**ため、承認する(`apply` しないので安全)。ステップサマリの「削除を含む変更」を読んでから、本番の実行に進む
+- **Environment `prod` は承認を待たない**(D36)。`deploy-to-prod` と `apply-to-prod` は、起動すると、`plan` を見る機会がないまま `apply` まで進む。コードで止めるのは、削除のガードだけである。そのため、起動の**前**に、次を行う
+  - `gh variable list --env prod` で、`GCP_PROJECT_ID` などの値の先頭・末尾に、空白がないかを確かめる
+  - `apply-to-prod` を、最新の `main` の SHA を入力し、`apply` を false(plan のみ)にして先に起動し、ステップサマリの「削除を含む変更」と計画を読む(prod は変わらない)。本番の実行は、そのあとに起動する([03-release.md](03-release.md) の「手順(リリース)」の 6)
+  - `apply-to-prod` の `allow_destroy` を `true` にしない。意図した削除だと確かめられたときだけ、`true` にする
+- 起動したあとに止めたいときは、実行をキャンセルする。`apply` が始まる前なら止められる。**始まったあとは、止めない**(途中で止めると state が壊れるおそれがある)。見分け方は [03-release.md](03-release.md) の「起動した実行を止める」。ジョブ名が `terraform (plan)` なら plan のみで、`apply` は動かない
 
 ## 手順
 
@@ -96,8 +96,8 @@ unset LINE_CHANNEL_SECRET
 ### 5. デプロイを再実行する
 
 1. 手元で `terraform plan` を実行して、差分が出ないことを確かめる
-2. `apply-to-prod` を、最新の `main` の SHA を入力し、`apply` を false にして起動し、ステップサマリの「削除を含む変更」が「なし」であることを確かめる(承認は求められるが、plan のみで `apply` しない)
-3. `deploy-to-prod` を起動する(最新の `main` の SHA を入力する。手順は [03-release.md](03-release.md) の「手順(リリース)」の 5・6)。失敗した実行の再実行は、`main` が進んでいないときだけ([03-release.md](03-release.md) の「失敗したとき」)。イメージは、ビルドして Artifact Registry に push し直される
+2. `apply-to-prod` を、最新の `main` の SHA を入力し、`apply` を false にして起動し、ステップサマリの「削除を含む変更」が「なし」であることを確かめる(plan のみで、`apply` しない)
+3. `deploy-to-prod` を起動する(最新の `main` の SHA を入力する。手順は [03-release.md](03-release.md) の「手順(リリース)」の 5・7)。失敗した実行の再実行は、`main` が進んでいないときだけ([03-release.md](03-release.md) の「失敗したとき」)。イメージは、ビルドして Artifact Registry に push し直される
 4. 削除を含む計画で止まったときは、**止まった理由を確かめる**。意図したものと確かめられるまで、`allow_destroy` を `true` にしない
 5. デプロイが成功して、Job が動くことを確かめてから、Scheduler を再開する(Environment の variable `SCHEDULER_PAUSED` を `false` にして、再デプロイする)
 

@@ -94,7 +94,7 @@ Actions はローカルで動かせない(`act` も、WIF・Environment・承認
   gh variable list --env <env> --json name,value | jq -r '.[] | select(.value | test("\\A[\\s\\x{200b}\\x{feff}]|[\\s\\x{200b}\\x{feff}]\\z")) | .name'
   ```
 - `${{ vars.X || '既定' }}` は、未設定と空文字の両方で既定になる。空白だけの値は、既定にならない
-- Environment の承認(Required reviewers)は、**ジョブごと**に求められる。承認が何回入るか
+- Environment `prod` / `dev` は、承認者(Required reviewers)を設定しておらず、承認を待たない(D36)。起動した実行は、止めない限り、そのまま進む。止める手段は、起動の前の確認(`apply-to-prod` の plan のみの実行)と、`apply` が始まる前のキャンセルだけ。承認を再開した場合は、承認が**ジョブごと**に求められるので、何回入るかを確かめる(`docs/engineering/02-infra.md` の「承認を再開するとき」)
 - PR のとき `github.ref` は `refs/pull/N/merge`。WIF の `attribute_condition`(prod は `refs/heads/main` のみ)に、**合うか**
 
 **D. 条件・トリガー・スキップ**
@@ -104,7 +104,7 @@ Actions はローカルで動かせない(`act` も、WIF・Environment・承認
 
 **E. 実行の安全性**
 - `plan` の結果を、**そのまま** `apply` するか(保存したプラン)。`destroy` / `replace` が含まれるときは、**何が消えるか**を読む
-- `apply` の前に、**削除のガード**があるか(`reusable-infra-deploy.yml`: `delete` / `replace` を含む計画を、`allow_destroy` が false なら止める)。Environment の承認は `plan` の前に求められ、承認では守れない。ガードを外していないか、`deploy-to-*` が `allow_destroy` を true で渡していないか。ガードの `jq` を変えたら、削除・replace・変更なし・`resource_changes` が無い計画の、サンプルの JSON で確かめる
+- `apply` の前に、**削除のガード**があるか(`reusable-infra-deploy.yml`: `delete` / `replace` を含む計画を、`allow_destroy` が false なら止める)。Environment `prod` は承認を待たず(D36)、`plan` を見る機会がないまま `apply` に進むので、このガードが止め役になる。ガードを外していないか、`deploy-to-*` が `allow_destroy` を true で渡していないか。ガードの `jq` を変えたら、削除・replace・変更なし・`resource_changes` が無い計画の、サンプルの JSON で確かめる
 - `deletion_protection` が有効なリソースが `tainted` になると、作り直しで止まる。実体が健全なら `untaint`
 - 失敗して途中で止まったとき、**再実行しても安全か**(冪等か)。中途半端な状態から、続きを実行できるか
 - 同じ環境の `apply` が並列にならないか(`concurrency`)

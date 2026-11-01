@@ -31,7 +31,8 @@ variable "deployer_roles" {
 
 # GitHub Actions から Terraform(plan / apply)を実行するために必要なロール。
 # このモジュール自身(WIF・サービスアカウント・プロジェクトの IAM)も管理対象に含むため、強い権限になる。
-# 権限の乱用を避けるため、prod は allowed_ref で main のみに限定し、Environment の承認を挟むこと。
+# 権限の乱用を避けるため、prod は allowed_ref で main のみに限定すること。Environment の承認は、開発の立ち上げ期は挟まない(D36)。
+# 承認なしで prod を守る仕組みは、docs/engineering/02-infra.md の「prod の保護(承認なし)」。
 variable "terraform_roles" {
   description = "Terraform の実行に必要なプロジェクトレベルのロール"
   type        = list(string)

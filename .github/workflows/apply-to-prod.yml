@@ -5,7 +5,8 @@ name: apply-to-prod
 #   gh workflow run apply-to-prod.yml --ref main -f sha=<最新の main の SHA>
 # 適用されるのは、起動したコミット(github.sha)。同じ SHA になる理由は、docs/engineering/02-infra.md の「CD」。
 # main 以外は拒否する(Workload Identity の条件でも、refs/heads/main 以外の認証は拒否される)。
-# GitHub の Environment `prod` に Required reviewers を設定して、承認を挟む。
+# GitHub の Environment `prod` に承認者(Required reviewers)は設定しない。承認を待たず、guard が通ると、そのまま apply まで進む(開発の立ち上げ期。D36)。
+# 計画を先に読むには、apply を false にして起動する(plan のみ)。止めたいときは、apply が始まる前に、実行をキャンセルする(docs/operations/03-release.md の「起動した実行を止める」)。
 on:
   workflow_dispatch:
     inputs:
