@@ -55,6 +55,47 @@ flowchart LR
 - **作業は、必ず Issue から始める**。Issue がなければ、先に立てる(Issue がないと、ブランチ名を決められない)
 - 作業ブランチは、マージ後に削除する(自動削除は有効にしていない。リリース PR の `develop` を、消さないため)
 
+## Git の設定と force push
+
+### 必須の git config
+
+開発を始める前に、**全員が**次の 2 つを設定する。`--global` なので、マシンごとに 1 回でよい。
+
+```
+git config --global merge.ff false
+git config --global pull.ff only
+```
+
+| 設定 | 動き | 目的 |
+| --- | --- | --- |
+| `merge.ff false` | `git merge` で、fast-forward できる場合も、常にマージコミットを作る | ブランチの合流を、マージコミットとして履歴に残す。設定が人によって違うと、同じ操作でも履歴の形が変わる |
+| `pull.ff only` | `git pull` は、fast-forward できる場合だけ許可する(`git pull` では `merge.ff` より優先される) | 意図しないマージコミットやリベースを防ぐ |
+
+- `--global` の設定は、このマシンの**すべてのリポジトリ**に効く。他のリポジトリでも、分岐した `git pull` は止まり、`git merge` は常にマージコミットを作る
+- 分岐していて fast-forward できないとき、`git pull` は `fatal: Not possible to fast-forward, aborting.` で止まる。`git merge` か `git rebase` を、自分で選んで実行する。止まるのは取得のあとなので、`origin/<作業ブランチ名>` は更新されている(次の「force push」を参照)
+- 設定済みかは `git config --global --get-all merge.ff` と `git config --global --get-all pull.ff` で確かめる(それぞれ `false`・`only` が 1 行だけ出れば正しい)
+- `--add` 付き(`git config --global --add merge.ff false`)でも同じ値になるが、再実行すると**同じ値が重複して**追加される。重複していると、`--add` なしは `error: cannot overwrite multiple values with a single value` で失敗する。`git config --global --replace-all merge.ff false` で 1 つにまとめる(`pull.ff` も同様)
+
+### force push
+
+force push するのは、**自分の作業ブランチ**だけ。`develop` と `main` は、Ruleset で force push を禁止している(「ブランチ保護」)ので、押せない。
+
+作業ブランチには保護がないため、`--force` だと、他の人が push したコミットまで上書きしてしまう(`--force` は、下の確認を何もせずに上書きする)。そのため、**いつも `--force-with-lease --force-if-includes` を使う**。
+
+```
+git push --force-with-lease --force-if-includes origin <作業ブランチ名>
+```
+
+| オプション | 拒否する条件 |
+| --- | --- |
+| `--force-with-lease` | リモートの作業ブランチが、手元の `origin/<作業ブランチ名>`(最後に取得した状態)と違うとき(`(stale info)` で拒否される) |
+| `--force-if-includes`(Git 2.30 以降) | 手元の `origin/<作業ブランチ名>` の先頭が、手元の作業ブランチに取り込まれていないとき(`Updates were rejected because the tip of the remote-tracking branch has been updated since the last checkout` のヒントが出る) |
+
+- `--force-if-includes` が要る理由: `origin/<作業ブランチ名>` は、人が実行する `git fetch`、分岐して失敗した `git pull`、裏で `git fetch` を自動実行するツール(エディタなど)でも更新される。`--force-with-lease` だけだと、これらで取得しただけの他の人のコミットも「取得済み」として扱い、取り込んでいなくても上書きする(`git push --help` の `--force-with-lease`)
+- 拒否されたら、`--force` に切り替えない。`git fetch` で相手の変更を確かめ、`git rebase origin/<作業ブランチ名>`(または `git merge origin/<作業ブランチ名>`)で取り込んでから、もう一度 push する。**取り込まずに、`--force-if-includes` を外して再実行しない**
+- force push が必要になるのは、push 済みの作業ブランチの履歴を書き換えたとき(`git rebase`、`git commit --amend` など)
+- Git のバージョンは `git --version` で確かめる。2.30 より古いと、`--force-if-includes` が使えない
+
 ## 通常の開発フロー(フェーズ 2)
 
 フェーズ 1 では、手順 1〜4 を省略して `develop` へ直接 push してよい(QA は push 後の `deploy-to-dev` で走る)。
